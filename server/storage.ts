@@ -13,8 +13,9 @@ import {
   type Workout,
   type WorkoutLog,
   type InsertWorkoutLog,
+  type UpdateWorkoutLog,
 } from "@shared/schema";
-import { and, desc, eq, gte, lte, asc } from "drizzle-orm";
+import { and, desc, eq, gte, lte, asc, inArray } from "drizzle-orm";
 import { db } from "./db";
 
 export interface IStorage {
@@ -37,15 +38,17 @@ export interface IStorage {
   deleteWorkoutPlan(id: string): Promise<boolean>;
 
   // Workout Logs
+  getWorkoutLog(id: string): Promise<WorkoutLog | undefined>;
   getUserWorkoutLogs(userId: string, limit?: number): Promise<WorkoutLog[]>;
   createWorkoutLog(log: InsertWorkoutLog): Promise<WorkoutLog>;
-  updateWorkoutLog(id: string, updates: Partial<InsertWorkoutLog>): Promise<WorkoutLog | undefined>;
+  updateWorkoutLog(id: string, updates: UpdateWorkoutLog): Promise<WorkoutLog | undefined>;
   deleteWorkoutLog(id: string): Promise<boolean>;
   getWorkoutLogsByDateRange(userId: string, startDate: Date, endDate: Date): Promise<WorkoutLog[]>;
 
   // Workouts (individual workouts from plans)
   getWorkout(id: string): Promise<Workout | undefined>;
   getPlanWorkouts(planId: string): Promise<Workout[]>;
+  getWorkoutsByIds(ids: string[]): Promise<Workout[]>;
   createWorkout(workout: {
     planId: string;
     name: string;
@@ -183,6 +186,11 @@ class DrizzleStorage implements IStorage {
   }
 
   // Workout Logs
+  async getWorkoutLog(id: string): Promise<WorkoutLog | undefined> {
+    const [log] = await db.select().from(workoutLogsTable).where(eq(workoutLogsTable.id, id));
+    return log;
+  }
+
   async getUserWorkoutLogs(userId: string, limit = 50): Promise<WorkoutLog[]> {
     return db
       .select()
@@ -199,15 +207,14 @@ class DrizzleStorage implements IStorage {
 
   async updateWorkoutLog(
     id: string,
-    updates: Partial<InsertWorkoutLog>,
+    updates: UpdateWorkoutLog,
   ): Promise<WorkoutLog | undefined> {
     const [existing] = await db.select().from(workoutLogsTable).where(eq(workoutLogsTable.id, id));
     if (!existing) {
       return undefined;
     }
 
-    const sanitized = applyDefinedFields<InsertWorkoutLog>(updates);
-    delete sanitized.userId;
+    const sanitized = applyDefinedFields<UpdateWorkoutLog>(updates);
     if (Object.keys(sanitized).length === 0) {
       return existing;
     }
@@ -259,6 +266,17 @@ class DrizzleStorage implements IStorage {
       .from(workoutsTable)
       .where(eq(workoutsTable.planId, planId))
       .orderBy(asc(workoutsTable.dayOfWeek), asc(workoutsTable.name));
+  }
+
+  async getWorkoutsByIds(ids: string[]): Promise<Workout[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return db
+      .select()
+      .from(workoutsTable)
+      .where(inArray(workoutsTable.id, ids));
   }
 
   async createWorkout(

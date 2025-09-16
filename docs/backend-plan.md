@@ -47,9 +47,9 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 - [x] Persist nutritional guidance and AI metadata alongside generated workout plans so it can be revisited later.
 - [x] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
 - [x] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
-- [ ] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
+- [x] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
 
-With the demo environment now seeded end-to-end, the next iteration can focus on enriching the workout logging APIs and wiring the frontend activity tracker to the persisted history.
+With the workout history now flowing from the database into the activity tracker, the next iteration can focus on deeper analytics (RPE, duration, calorie tracking) and exposing richer summaries across multiple weeks.
 
 #### Seed utility
 - Run `npm run db:seed` after migrations to reset the demo account with curated equipment, the Strong at Home plan, associated workouts, and a week of representative workout logs.

@@ -2,8 +2,17 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { AIServiceError, generateWorkoutPlan } from "./ai";
-import { insertEquipmentSchema, insertWorkoutPlanSchema, insertWorkoutLogSchema } from "@shared/schema";
+import {
+  insertEquipmentSchema,
+  insertWorkoutPlanSchema,
+  insertWorkoutLogSchema,
+  updateWorkoutLogSchema,
+  type Workout,
+  type WorkoutLog,
+} from "@shared/schema";
 import { z } from "zod";
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const DEMO_USER_USERNAME = "demo-user";
@@ -39,6 +48,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   const demoUserId = await resolveDemoUserId();
+
+  function formatValidationIssues(error: z.ZodError) {
+    return error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
+  }
+
+  async function ensureWorkoutBelongsToDemoUser(
+    workoutId: string,
+  ): Promise<{ workout: Workout } | { error: { status: number; message: string } }> {
+    const workout = await storage.getWorkout(workoutId);
+    if (!workout) {
+      return { error: { status: 404, message: "Workout not found" } };
+    }
+
+    const plan = await storage.getWorkoutPlan(workout.planId);
+    if (!plan || plan.userId !== demoUserId) {
+      return {
+        error: {
+          status: 403,
+          message: "Workout does not belong to the active user",
+        },
+      };
+    }
+
+    return { workout };
+  }
+
+  async function enrichLogsWithWorkouts(
+    logs: WorkoutLog[],
+  ): Promise<Array<WorkoutLog & { workout: Workout | null }>> {
+    const workoutIds = Array.from(
+      new Set(
+        logs
+          .map((log) => log.workoutId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    );
+
+    if (workoutIds.length === 0) {
+      return logs.map((log) => ({ ...log, workout: null as Workout | null }));
+    }
+
+    const workouts = await storage.getWorkoutsByIds(workoutIds);
+    const workoutMap = new Map(workouts.map((workout) => [workout.id, workout]));
+
+    return logs.map((log) => ({
+      ...log,
+      workout: log.workoutId ? workoutMap.get(log.workoutId) ?? null : null,
+    }));
+  }
+
+  function getExerciseCount(exercises: unknown): number {
+    return Array.isArray(exercises) ? exercises.length : 0;
+  }
 
   // Equipment endpoints
   app.get("/api/equipment", async (req, res) => {
@@ -290,36 +355,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Workout Log endpoints
   app.get("/api/workout-logs", async (req, res) => {
+    const queryValidation = z
+      .object({
+        limit: z
+          .preprocess((value) => {
+            const first = Array.isArray(value) ? value[0] : value;
+            if (first === undefined || first === null || first === "") {
+              return undefined;
+            }
+            return first;
+          }, z.coerce.number().int().positive().max(100))
+          .optional(),
+      })
+      .safeParse(req.query);
+
+    if (!queryValidation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log query parameters",
+        details: formatValidationIssues(queryValidation.error),
+      });
+    }
+
+    const limit = queryValidation.data.limit ?? 20;
+
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
       const logs = await storage.getUserWorkoutLogs(demoUserId, limit);
-      res.json(logs);
+      const logsWithWorkouts = await enrichLogsWithWorkouts(logs);
+      res.json(logsWithWorkouts);
     } catch (error) {
+      console.error("Failed to fetch workout logs:", error);
       res.status(500).json({ error: "Failed to fetch workout logs" });
     }
   });
 
   app.post("/api/workout-logs", async (req, res) => {
+    const validation = insertWorkoutLogSchema.safeParse({
+      ...req.body,
+      userId: demoUserId,
+    });
+
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log data",
+        details: formatValidationIssues(validation.error),
+      });
+    }
+
+    const payload = validation.data;
+
+    if (payload.workoutId) {
+      const ownership = await ensureWorkoutBelongsToDemoUser(payload.workoutId);
+      if ("error" in ownership) {
+        return res.status(ownership.error.status).json({ error: ownership.error.message });
+      }
+    }
+
     try {
-      const validatedData = insertWorkoutLogSchema.parse({ ...req.body, userId: demoUserId });
-      const log = await storage.createWorkoutLog(validatedData);
-      res.status(201).json(log);
+      const createdLog = await storage.createWorkoutLog(payload);
+      const [logWithWorkout] = await enrichLogsWithWorkouts([createdLog]);
+      res.status(201).json(logWithWorkout);
     } catch (error) {
-      res.status(400).json({ error: "Invalid workout log data" });
+      console.error("Failed to create workout log:", error);
+      res.status(500).json({ error: "Failed to create workout log" });
     }
   });
 
   app.put("/api/workout-logs/:id", async (req, res) => {
+    const { id } = req.params;
+
+    const existingLog = await storage.getWorkoutLog(id);
+    if (!existingLog || existingLog.userId !== demoUserId) {
+      return res.status(404).json({ error: "Workout log not found" });
+    }
+
+    const validation = updateWorkoutLogSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log data",
+        details: formatValidationIssues(validation.error),
+      });
+    }
+
+    const updates = validation.data;
+
+    if (updates.workoutId !== undefined) {
+      if (updates.workoutId) {
+        const ownership = await ensureWorkoutBelongsToDemoUser(updates.workoutId);
+        if ("error" in ownership) {
+          return res.status(ownership.error.status).json({ error: ownership.error.message });
+        }
+      } else {
+        const exerciseCount = updates.exercises !== undefined
+          ? getExerciseCount(updates.exercises)
+          : getExerciseCount(existingLog.exercises);
+
+        if (exerciseCount === 0) {
+          return res.status(400).json({
+            error: "Custom workout logs must include at least one exercise.",
+          });
+        }
+      }
+    } else if (updates.exercises !== undefined) {
+      const exerciseCount = getExerciseCount(updates.exercises);
+      if (exerciseCount === 0 && !existingLog.workoutId) {
+        return res.status(400).json({
+          error: "Custom workout logs must include at least one exercise.",
+        });
+      }
+    }
+
     try {
-      const { id } = req.params;
-      const updates = insertWorkoutLogSchema.partial().parse(req.body);
-      const log = await storage.updateWorkoutLog(id, updates);
-      if (!log) {
+      const updated = await storage.updateWorkoutLog(id, updates);
+      if (!updated) {
         return res.status(404).json({ error: "Workout log not found" });
       }
-      res.json(log);
+
+      const [logWithWorkout] = await enrichLogsWithWorkouts([updated]);
+      res.json(logWithWorkout);
     } catch (error) {
-      res.status(400).json({ error: "Invalid workout log data" });
+      console.error("Failed to update workout log:", error);
+      res.status(500).json({ error: "Failed to update workout log" });
     }
   });
 
@@ -338,42 +493,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Progress endpoint
   app.get("/api/progress", async (req, res) => {
+    const queryValidation = z
+      .object({
+        days: z
+          .preprocess((value) => {
+            const first = Array.isArray(value) ? value[0] : value;
+            if (first === undefined || first === null || first === "") {
+              return undefined;
+            }
+            return first;
+          }, z.coerce.number().int().min(1).max(31))
+          .optional(),
+      })
+      .safeParse(req.query);
+
+    if (!queryValidation.success) {
+      return res.status(400).json({
+        error: "Invalid progress query parameters",
+        details: formatValidationIssues(queryValidation.error),
+      });
+    }
+
+    const daysNumber = queryValidation.data.days ?? 7;
+    const endDate = new Date();
+    const startDate = new Date(endDate.getTime() - (daysNumber - 1) * DAY_IN_MS);
+
     try {
-      const { days = 7 } = req.query;
-      const daysNumber = parseInt(days as string);
-      const endDate = new Date();
-      const startDate = new Date(endDate.getTime() - (daysNumber * 24 * 60 * 60 * 1000));
-      
       const logs = await storage.getWorkoutLogsByDateRange(demoUserId, startDate, endDate);
-      
-      // Calculate daily stats
-      const dailyStats = [];
-      for (let i = 0; i < daysNumber; i++) {
-        const date = new Date(endDate.getTime() - (i * 24 * 60 * 60 * 1000));
-        const dayLogs = logs.filter(log => {
-          const logDate = new Date(log.completedAt!);
-          return logDate.toDateString() === date.toDateString();
-        });
-        
-        dailyStats.unshift({
-          date: date.toLocaleDateString('en-US', { weekday: 'short' }),
-          workouts: dayLogs.length,
-          streak: dayLogs.length > 0 ? 1 : 0,
+      const logsWithWorkouts = await enrichLogsWithWorkouts(logs);
+
+      const logDateCounts = new Map<string, number>();
+      for (const log of logs) {
+        if (!log.completedAt) continue;
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+        const key = completed.toDateString();
+        logDateCounts.set(key, (logDateCounts.get(key) ?? 0) + 1);
+      }
+
+      const dailyStats: Array<{ date: string; workouts: number; streak: number }> = [];
+      let runningStreak = 0;
+      for (let i = daysNumber - 1; i >= 0; i--) {
+        const currentDate = new Date(endDate.getTime() - i * DAY_IN_MS);
+        const key = currentDate.toDateString();
+        const workoutsForDay = logDateCounts.get(key) ?? 0;
+        runningStreak = workoutsForDay > 0 ? runningStreak + 1 : 0;
+
+        dailyStats.push({
+          date: currentDate.toLocaleDateString("en-US", { weekday: "short" }),
+          workouts: workoutsForDay,
+          streak: runningStreak,
         });
       }
-      
-      // Calculate overall stats
+
       const totalWorkouts = logs.length;
-      const logsWithRating = logs.filter(log => log.rating && log.rating > 0);
-      const averageRating = logsWithRating.length > 0 
-        ? logsWithRating.reduce((sum, log) => sum + (log.rating || 0), 0) / logsWithRating.length
+      const ratings = logs
+        .map((log) => (typeof log.rating === "number" && log.rating > 0 ? log.rating : null))
+        .filter((rating): rating is number => rating !== null);
+      const averageRating = ratings.length
+        ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length) * 10) / 10
         : 0;
-      
+
+      const daysForWeek = Math.min(daysNumber, 7);
+      const weekStart = new Date(endDate.getTime() - (daysForWeek - 1) * DAY_IN_MS);
+      const workoutsThisWeek = logs.filter((log) => {
+        if (!log.completedAt) {
+          return false;
+        }
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+        return completed >= weekStart;
+      }).length;
+
+      const totalMinutes = logsWithWorkouts.reduce((total, log) => {
+        if (log.workout?.estimatedDuration) {
+          return total + log.workout.estimatedDuration;
+        }
+
+        if (Array.isArray(log.exercises)) {
+          const exerciseMinutes = log.exercises.reduce((exerciseTotal, exercise) => {
+            if (!exercise || typeof exercise !== "object") {
+              return exerciseTotal;
+            }
+
+            const minutesFromMinutes = typeof (exercise as any).durationMinutes === "number"
+              ? (exercise as any).durationMinutes
+              : undefined;
+            const minutesFromGeneric = typeof (exercise as any).duration === "number"
+              ? (exercise as any).duration
+              : undefined;
+            const minutesFromSeconds = typeof (exercise as any).durationSeconds === "number"
+              ? Math.round((exercise as any).durationSeconds / 60)
+              : undefined;
+
+            const derivedMinutes = minutesFromMinutes ?? minutesFromGeneric ?? minutesFromSeconds ?? 0;
+            return exerciseTotal + derivedMinutes;
+          }, 0);
+
+          return total + exerciseMinutes;
+        }
+
+        return total;
+      }, 0);
+
       res.json({
         dailyStats,
         totalWorkouts,
-        averageRating: Math.round(averageRating * 10) / 10,
+        averageRating,
         currentStreak: calculateCurrentStreak(logs),
+        workoutsThisWeek,
+        totalMinutes: Math.max(0, Math.round(totalMinutes)),
       });
     } catch (error) {
       console.error("Error fetching progress:", error);
@@ -385,25 +612,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   return httpServer;
 }
 
-function calculateCurrentStreak(logs: any[]): number {
-  if (logs.length === 0) return 0;
-  
+function calculateCurrentStreak(logs: WorkoutLog[]): number {
+  if (logs.length === 0) {
+    return 0;
+  }
+
   const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const loggedDates = new Set(
+    logs
+      .filter((log) => log.completedAt)
+      .map((log) => {
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt!);
+        const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+        return normalized.toDateString();
+      }),
+  );
+
   let streak = 0;
-  
-  for (let i = 0; i < 30; i++) { // Check last 30 days
-    const checkDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
-    const hasWorkout = logs.some(log => {
-      const logDate = new Date(log.completedAt!);
-      return logDate.toDateString() === checkDate.toDateString();
-    });
-    
-    if (hasWorkout) {
+  for (let i = 0; i < 30; i++) {
+    const checkDate = new Date(todayStart.getTime() - i * DAY_IN_MS);
+    const key = checkDate.toDateString();
+    if (loggedDates.has(key)) {
       streak++;
-    } else if (i > 0) { // Allow today to be without workout
+    } else if (i > 0) {
       break;
     }
   }
-  
+
   return streak;
 }

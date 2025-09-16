@@ -69,9 +69,88 @@ export const insertWorkoutPlanSchema = createInsertSchema(workoutPlans).omit({
   createdAt: true,
 });
 
-export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({
-  id: true,
-  completedAt: true,
+const workoutLogExerciseSchema = z
+  .object({
+    name: z.string().min(1, "Exercise name is required"),
+    sets: z.number().int().positive().max(200).optional(),
+    reps: z.number().int().positive().max(500).optional(),
+    weightKg: z.number().nonnegative().max(500).optional(),
+    durationMinutes: z.number().int().positive().max(600).optional(),
+    durationSeconds: z.number().int().positive().max(3_600).optional(),
+    notes: z.string().max(500).optional(),
+    intensity: z.string().max(100).optional(),
+  })
+  .passthrough();
+
+const workoutLogBaseSchema = z.object({
+  workoutId: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      return value;
+    }, z.union([z.string().min(1, "Workout ID must be a non-empty string"), z.null()]))
+    .optional(),
+  completedAt: z
+    .preprocess((value) => {
+      if (value === undefined || value === null || value === "") {
+        return undefined;
+      }
+      return value;
+    }, z.coerce.date())
+    .optional(),
+  exercises: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      return value;
+    }, z.union([z.array(workoutLogExerciseSchema).max(50, "Limit of 50 exercises per log"), z.null()]))
+    .optional(),
+  notes: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed.length === 0 ? null : trimmed;
+      }
+      return value;
+    }, z.union([z.string().max(500, "Notes must be 500 characters or fewer"), z.null()]))
+    .optional(),
+  rating: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      return value;
+    }, z.union([z.coerce.number().int().min(1).max(5), z.null()]))
+    .optional(),
+});
+
+export const insertWorkoutLogSchema = workoutLogBaseSchema
+  .extend({
+    userId: z.string().min(1, "User ID is required"),
+  })
+  .superRefine((data, ctx) => {
+    const exerciseCount = Array.isArray(data.exercises) ? data.exercises.length : 0;
+    if (!data.workoutId && exerciseCount === 0) {
+      ctx.addIssue({
+        path: ["exercises"],
+        code: z.ZodIssueCode.custom,
+        message: "Provide at least one exercise when logging a custom workout.",
+      });
+    }
+  });
+
+export const updateWorkoutLogSchema = workoutLogBaseSchema.superRefine((data, ctx) => {
+  if (data.workoutId === null && data.exercises !== undefined) {
+    const exerciseCount = Array.isArray(data.exercises) ? data.exercises.length : 0;
+    if (exerciseCount === 0) {
+      ctx.addIssue({
+        path: ["exercises"],
+        code: z.ZodIssueCode.custom,
+        message: "Custom workout logs must include at least one exercise.",
+      });
+    }
+  }
 });
 
 // Types
@@ -83,4 +162,6 @@ export type WorkoutPlan = typeof workoutPlans.$inferSelect;
 export type InsertWorkoutPlan = z.infer<typeof insertWorkoutPlanSchema>;
 export type Workout = typeof workouts.$inferSelect;
 export type WorkoutLog = typeof workoutLogs.$inferSelect;
+export type WorkoutLogExercise = z.infer<typeof workoutLogExerciseSchema>;
 export type InsertWorkoutLog = z.infer<typeof insertWorkoutLogSchema>;
+export type UpdateWorkoutLog = z.infer<typeof updateWorkoutLogSchema>;
