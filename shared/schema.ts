@@ -52,9 +52,12 @@ export const workoutLogs = pgTable("workout_logs", {
 });
 
 // Insert schemas
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+const baseInsertUserSchema = createInsertSchema(users);
+
+export const insertUserSchema = z.object({
+  id: baseInsertUserSchema.shape.id.optional(),
+  username: baseInsertUserSchema.shape.username,
+  password: baseInsertUserSchema.shape.password,
 });
 
 export const insertEquipmentSchema = createInsertSchema(equipment).omit({

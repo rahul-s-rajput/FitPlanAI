@@ -6,13 +6,44 @@ import { insertEquipmentSchema, insertWorkoutPlanSchema, insertWorkoutLogSchema 
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Mock user for demo purposes
-  const DEMO_USER_ID = "demo-user";
+  const DEMO_USER_USERNAME = "demo-user";
+  const FALLBACK_DEMO_USER_ID = "demo-user";
+
+  async function resolveDemoUserId(): Promise<string> {
+    const existingById = await storage.getUser(FALLBACK_DEMO_USER_ID);
+    if (existingById) {
+      return existingById.id;
+    }
+
+    const existingByUsername = await storage.getUserByUsername(DEMO_USER_USERNAME);
+    if (existingByUsername) {
+      return existingByUsername.id;
+    }
+
+    try {
+      const created = await storage.createUser({
+        id: FALLBACK_DEMO_USER_ID,
+        username: DEMO_USER_USERNAME,
+        password: "demo-user-password",
+      });
+      return created.id;
+    } catch (error) {
+      const fallback = await storage.getUserByUsername(DEMO_USER_USERNAME);
+      if (fallback) {
+        return fallback.id;
+      }
+
+      console.error("Failed to provision demo user:", error);
+      throw error;
+    }
+  }
+
+  const demoUserId = await resolveDemoUserId();
 
   // Equipment endpoints
   app.get("/api/equipment", async (req, res) => {
     try {
-      const equipment = await storage.getUserEquipment(DEMO_USER_ID);
+      const equipment = await storage.getUserEquipment(demoUserId);
       res.json(equipment);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch equipment" });
@@ -21,7 +52,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/equipment", async (req, res) => {
     try {
-      const validatedData = insertEquipmentSchema.parse({ ...req.body, userId: DEMO_USER_ID });
+      const validatedData = insertEquipmentSchema.parse({ ...req.body, userId: demoUserId });
       const equipment = await storage.createEquipment(validatedData);
       res.status(201).json(equipment);
     } catch (error) {
@@ -59,7 +90,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Workout Plan endpoints
   app.get("/api/workout-plans", async (req, res) => {
     try {
-      const plans = await storage.getUserWorkoutPlans(DEMO_USER_ID);
+      const plans = await storage.getUserWorkoutPlans(demoUserId);
       res.json(plans);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch workout plans" });
@@ -81,7 +112,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/workout-plans", async (req, res) => {
     try {
-      const validatedData = insertWorkoutPlanSchema.parse({ ...req.body, userId: DEMO_USER_ID });
+      const validatedData = insertWorkoutPlanSchema.parse({ ...req.body, userId: demoUserId });
       const plan = await storage.createWorkoutPlan(validatedData);
       res.status(201).json(plan);
     } catch (error) {
@@ -137,7 +168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { goals, restrictions, weeklyMinutes, dailyMinutes } = validation.data;
 
     try {
-      const equipment = await storage.getUserEquipment(DEMO_USER_ID);
+      const equipment = await storage.getUserEquipment(demoUserId);
 
       const { plan: generatedPlan, metadata: aiMetadata } = await generateWorkoutPlan({
         equipment,
@@ -148,7 +179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       const savedPlan = await storage.createWorkoutPlan({
-        userId: DEMO_USER_ID,
+        userId: demoUserId,
         name: generatedPlan.name,
         description: generatedPlan.description,
         goals,
@@ -261,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/workout-logs", async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-      const logs = await storage.getUserWorkoutLogs(DEMO_USER_ID, limit);
+      const logs = await storage.getUserWorkoutLogs(demoUserId, limit);
       res.json(logs);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch workout logs" });
@@ -270,7 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/workout-logs", async (req, res) => {
     try {
-      const validatedData = insertWorkoutLogSchema.parse({ ...req.body, userId: DEMO_USER_ID });
+      const validatedData = insertWorkoutLogSchema.parse({ ...req.body, userId: demoUserId });
       const log = await storage.createWorkoutLog(validatedData);
       res.status(201).json(log);
     } catch (error) {
@@ -313,7 +344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const endDate = new Date();
       const startDate = new Date(endDate.getTime() - (daysNumber * 24 * 60 * 60 * 1000));
       
-      const logs = await storage.getWorkoutLogsByDateRange(DEMO_USER_ID, startDate, endDate);
+      const logs = await storage.getWorkoutLogsByDateRange(demoUserId, startDate, endDate);
       
       // Calculate daily stats
       const dailyStats = [];
