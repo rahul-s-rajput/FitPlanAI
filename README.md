@@ -15,7 +15,9 @@ The repository is a single Vite workspace that serves the client UI and API from
 
 - **Node.js** 18 or newer.
 - **npm** (ships with Node) for dependency management and scripts.
+
 - **PostgreSQL** database and connection string (local server, Docker container, or a managed provider such as Supabase).
+
 - **OpenRouter** API key for generating workout plans and nutrition guidance with free community models.
 
 ## Installation
@@ -46,14 +48,17 @@ The repository is a single Vite workspace that serves the client UI and API from
 
    The server validates the core environment values on startup, so ensure they are present before running scripts.
 
+
 3. **Provision PostgreSQL**
 
    FitPlanAI connects to a standard PostgreSQL database through the Node `pg` driver. Pick whichever option fits your
    workflow and ensure the `DATABASE_URL` in your `.env` points at the running instance before running migrations:
 
+
    - **Use Supabase** – create a project at [supabase.com](https://supabase.com), open _Project Settings → Database_,
      and copy the _Connection string_ (URI) for pooled connections. Supabase enforces SSL, so the URI should already
      include `?sslmode=require`. Paste the value into your `.env` file as `DATABASE_URL`.
+
    - **Run Postgres locally** – if you have Docker installed, start a database with:
 
      ```bash
@@ -71,6 +76,7 @@ The repository is a single Vite workspace that serves the client UI and API from
    machine.
 
 4. **Apply database migrations**
+
 
    ```bash
    npm run db:push

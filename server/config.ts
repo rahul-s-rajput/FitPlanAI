@@ -1,6 +1,8 @@
+
 import { z, type ZodIssue } from "zod";
 
 const envObjectSchema = z
+
   .object({
     DATABASE_URL: z
       .string()
@@ -18,6 +20,7 @@ const envObjectSchema = z
       .positive()
       .max(120_000)
       .optional(),
+
     SUPABASE_URL: z.string().url().optional(),
     SUPABASE_ANON_KEY: z.string().optional(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
@@ -48,6 +51,7 @@ if (!parsed.success) {
   const errorMessages = parsed.error.issues
     .map((issue: ZodIssue) => issue.message)
     .join(", ");
+
   throw new Error(`Invalid environment configuration: ${errorMessages}`);
 }
 
@@ -63,6 +67,7 @@ export const config = {
     baseUrl: parsed.data.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
     requestTimeoutMs: parsed.data.OPENROUTER_TIMEOUT_MS ?? 60_000,
   },
+
   supabase: parsed.data.SUPABASE_URL
     ? {
         url: parsed.data.SUPABASE_URL,
@@ -70,4 +75,5 @@ export const config = {
         serviceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY!,
       }
     : undefined,
+
 };
