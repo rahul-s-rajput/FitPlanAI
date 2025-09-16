@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { generateWorkoutPlan, generateNutritionalGuidance } from "./openai";
+import { AIServiceError, generateWorkoutPlan } from "./ai";
 import { insertEquipmentSchema, insertWorkoutPlanSchema, insertWorkoutLogSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -104,25 +104,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/generate-workout-plan", async (req, res) => {
-    try {
-      // Validate request body
-      const requestSchema = z.object({
-        goals: z.array(z.string()).min(1, "At least one goal is required"),
-        restrictions: z.object({
-          space: z.string(),
-          noise: z.string(),
-          outdoor: z.boolean()
-        }),
-        weeklyMinutes: z.number().min(1, "Weekly minutes must be greater than 0"),
-        dailyMinutes: z.number().min(1, "Daily minutes must be greater than 0")
+    const requestSchema = z.object({
+      goals: z.array(z.string().min(1)).min(1, "At least one goal is required"),
+      restrictions: z.object({
+        space: z.string().min(1),
+        noise: z.string().min(1),
+        outdoor: z.boolean(),
+      }),
+      weeklyMinutes: z.coerce
+        .number()
+        .int()
+        .positive("Weekly minutes must be greater than 0"),
+      dailyMinutes: z.coerce
+        .number()
+        .int()
+        .positive("Daily minutes must be greater than 0"),
+    });
+
+    const validation = requestSchema.safeParse(req.body);
+    if (!validation.success) {
+      const details = validation.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      }));
+
+      return res.status(400).json({
+        error: "Invalid generate-workout-plan payload",
+        details,
       });
-      
-      const { goals, restrictions, weeklyMinutes, dailyMinutes } = requestSchema.parse(req.body);
-      
-      // Get user's equipment
+    }
+
+    const { goals, restrictions, weeklyMinutes, dailyMinutes } = validation.data;
+
+    try {
       const equipment = await storage.getUserEquipment(DEMO_USER_ID);
-      
-      // Generate AI workout plan
+
       const generatedPlan = await generateWorkoutPlan({
         equipment,
         goals,
@@ -131,7 +147,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyMinutes,
       });
 
-      // Save the generated plan
       const savedPlan = await storage.createWorkoutPlan({
         userId: DEMO_USER_ID,
         name: generatedPlan.name,
@@ -142,7 +157,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyMinutes,
       });
 
-      // Save individual workouts from the generated plan
       const savedWorkouts = [];
       for (const workout of generatedPlan.workouts) {
         const savedWorkout = await storage.createWorkout({
@@ -161,6 +175,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nutritionalGuidance: generatedPlan.nutritionalGuidance,
       });
     } catch (error) {
+      if (error instanceof AIServiceError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+
       console.error("Error generating workout plan:", error);
       res.status(500).json({ error: "Failed to generate workout plan" });
     }
