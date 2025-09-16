@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const envSchema = z
   .object({
+    DATABASE_URL: z
+      .string()
+      .min(1, "DATABASE_URL environment variable is required"),
     OPENROUTER_API_KEY: z
       .string()
       .min(1, "OPENROUTER_API_KEY environment variable is required"),
@@ -26,6 +29,9 @@ if (!parsed.success) {
 }
 
 export const config = {
+  database: {
+    url: parsed.data.DATABASE_URL,
+  },
   openRouter: {
     apiKey: parsed.data.OPENROUTER_API_KEY,
     model: parsed.data.OPENROUTER_MODEL ?? "openai/gpt-oss-120b:free",

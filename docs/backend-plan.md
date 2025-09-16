@@ -17,8 +17,8 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 - [ ] Support separate prompts for workout periodization vs. nutritional targets.
 
 ## 3. Data Persistence Layer
-- [ ] Replace in-memory storage with PostgreSQL via Drizzle ORM.
-- [ ] Implement migrations for equipment, workout plans, workouts, logs, and users.
+- [x] Replace in-memory storage with PostgreSQL via Drizzle ORM.
+- [x] Implement migrations for equipment, workout plans, workouts, logs, and users.
 - [ ] Add seed scripts for demo data and integration testing.
 
 ## 4. Authentication & User Management
@@ -45,7 +45,8 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 
 ### Immediate Next Steps
 - [x] Persist nutritional guidance and AI metadata alongside generated workout plans so it can be revisited later.
-- [ ] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
+- [x] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
+- [ ] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
 - [ ] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
 
 With AI metadata now stored, the next iteration can focus on wiring the plan repository to Drizzle and enriching logging validation so the client can rely on durable history.
