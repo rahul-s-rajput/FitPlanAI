@@ -10,6 +10,13 @@ export default function WorkoutPlanCardExample() {
     restrictions: { space: "limited", noise: "no_noise", outdoor: false },
     weeklyMinutes: 180,
     dailyMinutes: 30,
+    nutritionalGuidance:
+      "Aim for 1.8g/kg protein, hydrate regularly, and include leafy greens at each meal.",
+    aiMetadata: {
+      provider: "openrouter",
+      model: "openai/gpt-oss-120b:free",
+      createdAt: new Date().toISOString(),
+    },
     createdAt: new Date(),
   };
 

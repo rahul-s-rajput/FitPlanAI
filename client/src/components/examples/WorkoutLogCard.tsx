@@ -12,6 +12,10 @@ export default function WorkoutLogCardExample() {
     ],
     notes: "Great workout! Felt strong today.",
     rating: 5,
+    rpe: 7,
+    durationMinutes: 35,
+    caloriesBurned: 300,
+    tags: ["strength", "upper-body"],
   };
 
   return (
