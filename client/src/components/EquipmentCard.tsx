@@ -1,7 +1,13 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dumbbell, Zap, Weight, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { Dumbbell, Zap, Weight, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { Equipment } from "@shared/schema";
 
 interface EquipmentCardProps {
@@ -25,16 +31,6 @@ const getEquipmentIcon = (type: string) => {
 export function EquipmentCard({ equipment, onEdit, onDelete }: EquipmentCardProps) {
   const Icon = getEquipmentIcon(equipment.type);
 
-  const handleEdit = () => {
-    console.log("Edit equipment:", equipment.id);
-    onEdit?.(equipment);
-  };
-
-  const handleDelete = () => {
-    console.log("Delete equipment:", equipment.id);
-    onDelete?.(equipment.id);
-  };
-
   return (
     <Card className="p-4 hover-elevate" data-testid={`card-equipment-${equipment.id}`}>
       <div className="flex items-start justify-between gap-3">
@@ -50,7 +46,7 @@ export function EquipmentCard({ equipment, onEdit, onDelete }: EquipmentCardProp
               <Badge variant="secondary" className="text-xs">
                 {equipment.type.replace("_", " ")}
               </Badge>
-              {equipment.weight && (
+              {typeof equipment.weight === "number" && (
                 <Badge variant="outline" className="text-xs">
                   {equipment.weight}kg
                 </Badge>
@@ -63,15 +59,29 @@ export function EquipmentCard({ equipment, onEdit, onDelete }: EquipmentCardProp
             </div>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleEdit}
-          data-testid={`button-equipment-menu-${equipment.id}`}
-          className="h-8 w-8 flex-shrink-0"
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              data-testid={`button-equipment-menu-${equipment.id}`}
+              className="h-8 w-8 flex-shrink-0"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onSelect={() => onEdit?.(equipment)} className="gap-2">
+              <Pencil className="h-4 w-4" /> Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onDelete?.(equipment.id)}
+              className="gap-2 text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </Card>
   );
