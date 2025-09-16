@@ -1,18 +1,153 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { generateWorkoutPlan, generateNutritionalGuidance } from "./openai";
-import { insertEquipmentSchema, insertWorkoutPlanSchema, insertWorkoutLogSchema } from "@shared/schema";
+import { AIServiceError, generateWorkoutPlan } from "./ai";
+import {
+  insertEquipmentSchema,
+  insertWorkoutPlanSchema,
+  insertWorkoutLogSchema,
+  updateWorkoutLogSchema,
+  type Workout,
+  type WorkoutLog,
+} from "@shared/schema";
 import { z } from "zod";
 
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+type WorkoutLogWithWorkout = WorkoutLog & { workout: Workout | null };
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Mock user for demo purposes
-  const DEMO_USER_ID = "demo-user";
+  const DEMO_USER_USERNAME = "demo-user";
+  const FALLBACK_DEMO_USER_ID = "demo-user";
+
+  async function resolveDemoUserId(): Promise<string> {
+    const existingById = await storage.getUser(FALLBACK_DEMO_USER_ID);
+    if (existingById) {
+      return existingById.id;
+    }
+
+    const existingByUsername = await storage.getUserByUsername(DEMO_USER_USERNAME);
+    if (existingByUsername) {
+      return existingByUsername.id;
+    }
+
+    try {
+      const created = await storage.createUser({
+        id: FALLBACK_DEMO_USER_ID,
+        username: DEMO_USER_USERNAME,
+        password: "demo-user-password",
+      });
+      return created.id;
+    } catch (error) {
+      const fallback = await storage.getUserByUsername(DEMO_USER_USERNAME);
+      if (fallback) {
+        return fallback.id;
+      }
+
+      console.error("Failed to provision demo user:", error);
+      throw error;
+    }
+  }
+
+  const demoUserId = await resolveDemoUserId();
+
+  function formatValidationIssues(error: z.ZodError) {
+    return error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
+  }
+
+  async function ensureWorkoutBelongsToDemoUser(
+    workoutId: string,
+  ): Promise<{ workout: Workout } | { error: { status: number; message: string } }> {
+    const workout = await storage.getWorkout(workoutId);
+    if (!workout) {
+      return { error: { status: 404, message: "Workout not found" } };
+    }
+
+    const plan = await storage.getWorkoutPlan(workout.planId);
+    if (!plan || plan.userId !== demoUserId) {
+      return {
+        error: {
+          status: 403,
+          message: "Workout does not belong to the active user",
+        },
+      };
+    }
+
+    return { workout };
+  }
+
+  async function enrichLogsWithWorkouts(
+    logs: WorkoutLog[],
+  ): Promise<Array<WorkoutLog & { workout: Workout | null }>> {
+    const workoutIds = Array.from(
+      new Set(
+        logs
+          .map((log) => log.workoutId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    );
+
+    if (workoutIds.length === 0) {
+      return logs.map((log) => ({ ...log, workout: null as Workout | null }));
+    }
+
+    const workouts = await storage.getWorkoutsByIds(workoutIds);
+    const workoutMap = new Map(workouts.map((workout) => [workout.id, workout]));
+
+    return logs.map((log) => ({
+      ...log,
+      workout: log.workoutId ? workoutMap.get(log.workoutId) ?? null : null,
+    }));
+  }
+
+  function getExerciseCount(exercises: unknown): number {
+    return Array.isArray(exercises) ? exercises.length : 0;
+  }
+
+  function calculateExerciseDurationMinutes(exercises: unknown): number {
+    if (!Array.isArray(exercises)) {
+      return 0;
+    }
+
+    return Math.round(
+      exercises.reduce((total, exercise) => {
+        if (!exercise || typeof exercise !== "object") {
+          return total;
+        }
+
+        const entry = exercise as Record<string, unknown>;
+        const minutesFromMinutes = typeof entry.durationMinutes === "number" ? entry.durationMinutes : undefined;
+        const minutesFromGeneric = typeof entry.duration === "number" ? entry.duration : undefined;
+        const minutesFromSeconds = typeof entry.durationSeconds === "number"
+          ? Math.round(entry.durationSeconds / 60)
+          : undefined;
+
+        const derivedMinutes = minutesFromMinutes ?? minutesFromGeneric ?? minutesFromSeconds ?? 0;
+        return total + (Number.isFinite(derivedMinutes) ? derivedMinutes : 0);
+      }, 0),
+    );
+  }
+
+  function resolveLogDurationMinutes(log: WorkoutLogWithWorkout): number {
+    if (typeof log.durationMinutes === "number" && Number.isFinite(log.durationMinutes)) {
+      return Math.max(0, Math.round(log.durationMinutes));
+    }
+
+    const workoutDuration = log.workout?.estimatedDuration;
+    if (typeof workoutDuration === "number" && Number.isFinite(workoutDuration)) {
+      return Math.max(0, Math.round(workoutDuration));
+    }
+
+    return Math.max(0, calculateExerciseDurationMinutes(log.exercises));
+  }
 
   // Equipment endpoints
   app.get("/api/equipment", async (req, res) => {
     try {
-      const equipment = await storage.getUserEquipment(DEMO_USER_ID);
+      const equipment = await storage.getUserEquipment(demoUserId);
       res.json(equipment);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch equipment" });
@@ -21,7 +156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/equipment", async (req, res) => {
     try {
-      const validatedData = insertEquipmentSchema.parse({ ...req.body, userId: DEMO_USER_ID });
+      const validatedData = insertEquipmentSchema.parse({ ...req.body, userId: demoUserId });
       const equipment = await storage.createEquipment(validatedData);
       res.status(201).json(equipment);
     } catch (error) {
@@ -59,7 +194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Workout Plan endpoints
   app.get("/api/workout-plans", async (req, res) => {
     try {
-      const plans = await storage.getUserWorkoutPlans(DEMO_USER_ID);
+      const plans = await storage.getUserWorkoutPlans(demoUserId);
       res.json(plans);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch workout plans" });
@@ -81,7 +216,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/workout-plans", async (req, res) => {
     try {
-      const validatedData = insertWorkoutPlanSchema.parse({ ...req.body, userId: DEMO_USER_ID });
+      const validatedData = insertWorkoutPlanSchema.parse({ ...req.body, userId: demoUserId });
       const plan = await storage.createWorkoutPlan(validatedData);
       res.status(201).json(plan);
     } catch (error) {
@@ -104,26 +239,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/generate-workout-plan", async (req, res) => {
-    try {
-      // Validate request body
-      const requestSchema = z.object({
-        goals: z.array(z.string()).min(1, "At least one goal is required"),
-        restrictions: z.object({
-          space: z.string(),
-          noise: z.string(),
-          outdoor: z.boolean()
-        }),
-        weeklyMinutes: z.number().min(1, "Weekly minutes must be greater than 0"),
-        dailyMinutes: z.number().min(1, "Daily minutes must be greater than 0")
+    const requestSchema = z.object({
+      goals: z.array(z.string().min(1)).min(1, "At least one goal is required"),
+      restrictions: z.object({
+        space: z.string().min(1),
+        noise: z.string().min(1),
+        outdoor: z.boolean(),
+      }),
+      weeklyMinutes: z.coerce
+        .number()
+        .int()
+        .positive("Weekly minutes must be greater than 0"),
+      dailyMinutes: z.coerce
+        .number()
+        .int()
+        .positive("Daily minutes must be greater than 0"),
+    });
+
+    const validation = requestSchema.safeParse(req.body);
+    if (!validation.success) {
+      const details = validation.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      }));
+
+      return res.status(400).json({
+        error: "Invalid generate-workout-plan payload",
+        details,
       });
-      
-      const { goals, restrictions, weeklyMinutes, dailyMinutes } = requestSchema.parse(req.body);
-      
-      // Get user's equipment
-      const equipment = await storage.getUserEquipment(DEMO_USER_ID);
-      
-      // Generate AI workout plan
-      const generatedPlan = await generateWorkoutPlan({
+    }
+
+    const { goals, restrictions, weeklyMinutes, dailyMinutes } = validation.data;
+
+    try {
+      const equipment = await storage.getUserEquipment(demoUserId);
+
+      const { plan: generatedPlan, metadata: aiMetadata } = await generateWorkoutPlan({
         equipment,
         goals,
         restrictions,
@@ -131,18 +282,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyMinutes,
       });
 
-      // Save the generated plan
       const savedPlan = await storage.createWorkoutPlan({
-        userId: DEMO_USER_ID,
+        userId: demoUserId,
         name: generatedPlan.name,
         description: generatedPlan.description,
         goals,
         restrictions,
         weeklyMinutes,
         dailyMinutes,
+        nutritionalGuidance: generatedPlan.nutritionalGuidance,
+        aiMetadata,
       });
 
-      // Save individual workouts from the generated plan
       const savedWorkouts = [];
       for (const workout of generatedPlan.workouts) {
         const savedWorkout = await storage.createWorkout({
@@ -159,8 +310,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         plan: savedPlan,
         workouts: savedWorkouts,
         nutritionalGuidance: generatedPlan.nutritionalGuidance,
+        aiMetadata,
       });
     } catch (error) {
+      if (error instanceof AIServiceError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+
       console.error("Error generating workout plan:", error);
       res.status(500).json({ error: "Failed to generate workout plan" });
     }
@@ -238,36 +394,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Workout Log endpoints
   app.get("/api/workout-logs", async (req, res) => {
+    const queryValidation = z
+      .object({
+        limit: z
+          .preprocess((value) => {
+            const first = Array.isArray(value) ? value[0] : value;
+            if (first === undefined || first === null || first === "") {
+              return undefined;
+            }
+            return first;
+          }, z.coerce.number().int().positive().max(100))
+          .optional(),
+      })
+      .safeParse(req.query);
+
+    if (!queryValidation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log query parameters",
+        details: formatValidationIssues(queryValidation.error),
+      });
+    }
+
+    const limit = queryValidation.data.limit ?? 20;
+
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-      const logs = await storage.getUserWorkoutLogs(DEMO_USER_ID, limit);
-      res.json(logs);
+      const logs = await storage.getUserWorkoutLogs(demoUserId, limit);
+      const logsWithWorkouts = await enrichLogsWithWorkouts(logs);
+      res.json(logsWithWorkouts);
     } catch (error) {
+      console.error("Failed to fetch workout logs:", error);
       res.status(500).json({ error: "Failed to fetch workout logs" });
     }
   });
 
   app.post("/api/workout-logs", async (req, res) => {
+    const validation = insertWorkoutLogSchema.safeParse({
+      ...req.body,
+      userId: demoUserId,
+    });
+
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log data",
+        details: formatValidationIssues(validation.error),
+      });
+    }
+
+    const payload = validation.data;
+
+    if (payload.workoutId) {
+      const ownership = await ensureWorkoutBelongsToDemoUser(payload.workoutId);
+      if ("error" in ownership) {
+        return res.status(ownership.error.status).json({ error: ownership.error.message });
+      }
+    }
+
     try {
-      const validatedData = insertWorkoutLogSchema.parse({ ...req.body, userId: DEMO_USER_ID });
-      const log = await storage.createWorkoutLog(validatedData);
-      res.status(201).json(log);
+      const createdLog = await storage.createWorkoutLog(payload);
+      const [logWithWorkout] = await enrichLogsWithWorkouts([createdLog]);
+      res.status(201).json(logWithWorkout);
     } catch (error) {
-      res.status(400).json({ error: "Invalid workout log data" });
+      console.error("Failed to create workout log:", error);
+      res.status(500).json({ error: "Failed to create workout log" });
     }
   });
 
   app.put("/api/workout-logs/:id", async (req, res) => {
+    const { id } = req.params;
+
+    const existingLog = await storage.getWorkoutLog(id);
+    if (!existingLog || existingLog.userId !== demoUserId) {
+      return res.status(404).json({ error: "Workout log not found" });
+    }
+
+    const validation = updateWorkoutLogSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: "Invalid workout log data",
+        details: formatValidationIssues(validation.error),
+      });
+    }
+
+    const updates = validation.data;
+
+    if (updates.workoutId !== undefined) {
+      if (updates.workoutId) {
+        const ownership = await ensureWorkoutBelongsToDemoUser(updates.workoutId);
+        if ("error" in ownership) {
+          return res.status(ownership.error.status).json({ error: ownership.error.message });
+        }
+      } else {
+        const exerciseCount = updates.exercises !== undefined
+          ? getExerciseCount(updates.exercises)
+          : getExerciseCount(existingLog.exercises);
+
+        if (exerciseCount === 0) {
+          return res.status(400).json({
+            error: "Custom workout logs must include at least one exercise.",
+          });
+        }
+      }
+    } else if (updates.exercises !== undefined) {
+      const exerciseCount = getExerciseCount(updates.exercises);
+      if (exerciseCount === 0 && !existingLog.workoutId) {
+        return res.status(400).json({
+          error: "Custom workout logs must include at least one exercise.",
+        });
+      }
+    }
+
     try {
-      const { id } = req.params;
-      const updates = insertWorkoutLogSchema.partial().parse(req.body);
-      const log = await storage.updateWorkoutLog(id, updates);
-      if (!log) {
+      const updated = await storage.updateWorkoutLog(id, updates);
+      if (!updated) {
         return res.status(404).json({ error: "Workout log not found" });
       }
-      res.json(log);
+
+      const [logWithWorkout] = await enrichLogsWithWorkouts([updated]);
+      res.json(logWithWorkout);
     } catch (error) {
-      res.status(400).json({ error: "Invalid workout log data" });
+      console.error("Failed to update workout log:", error);
+      res.status(500).json({ error: "Failed to update workout log" });
     }
   });
 
@@ -286,42 +532,208 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Progress endpoint
   app.get("/api/progress", async (req, res) => {
+    const queryValidation = z
+      .object({
+        days: z
+          .preprocess((value) => {
+            const first = Array.isArray(value) ? value[0] : value;
+            if (first === undefined || first === null || first === "") {
+              return undefined;
+            }
+            return first;
+          }, z.coerce.number().int().min(1).max(31))
+          .optional(),
+      })
+      .safeParse(req.query);
+
+    if (!queryValidation.success) {
+      return res.status(400).json({
+        error: "Invalid progress query parameters",
+        details: formatValidationIssues(queryValidation.error),
+      });
+    }
+
+    const daysNumber = queryValidation.data.days ?? 7;
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const windowStart = new Date(todayStart.getTime() - (daysNumber - 1) * DAY_IN_MS);
+    const windowEnd = new Date(todayStart.getTime() + DAY_IN_MS - 1);
+
     try {
-      const { days = 7 } = req.query;
-      const daysNumber = parseInt(days as string);
-      const endDate = new Date();
-      const startDate = new Date(endDate.getTime() - (daysNumber * 24 * 60 * 60 * 1000));
-      
-      const logs = await storage.getWorkoutLogsByDateRange(DEMO_USER_ID, startDate, endDate);
-      
-      // Calculate daily stats
-      const dailyStats = [];
-      for (let i = 0; i < daysNumber; i++) {
-        const date = new Date(endDate.getTime() - (i * 24 * 60 * 60 * 1000));
-        const dayLogs = logs.filter(log => {
-          const logDate = new Date(log.completedAt!);
-          return logDate.toDateString() === date.toDateString();
-        });
-        
-        dailyStats.unshift({
-          date: date.toLocaleDateString('en-US', { weekday: 'short' }),
-          workouts: dayLogs.length,
-          streak: dayLogs.length > 0 ? 1 : 0,
+      const logs = await storage.getWorkoutLogsByDateRange(demoUserId, windowStart, windowEnd);
+      const logsWithWorkouts = await enrichLogsWithWorkouts(logs);
+
+      const logDateCounts = new Map<string, number>();
+      for (const log of logs) {
+        if (!log.completedAt) continue;
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+        const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+        const key = normalized.toDateString();
+        logDateCounts.set(key, (logDateCounts.get(key) ?? 0) + 1);
+      }
+
+      const dailyStats: Array<{ date: string; workouts: number; streak: number }> = [];
+      let runningStreak = 0;
+      for (let i = daysNumber - 1; i >= 0; i--) {
+        const currentDate = new Date(todayStart.getTime() - i * DAY_IN_MS);
+        const key = currentDate.toDateString();
+        const workoutsForDay = logDateCounts.get(key) ?? 0;
+        runningStreak = workoutsForDay > 0 ? runningStreak + 1 : 0;
+
+        dailyStats.push({
+          date: currentDate.toLocaleDateString("en-US", { weekday: "short" }),
+          workouts: workoutsForDay,
+          streak: runningStreak,
         });
       }
-      
-      // Calculate overall stats
+
       const totalWorkouts = logs.length;
-      const logsWithRating = logs.filter(log => log.rating && log.rating > 0);
-      const averageRating = logsWithRating.length > 0 
-        ? logsWithRating.reduce((sum, log) => sum + (log.rating || 0), 0) / logsWithRating.length
+      const ratings = logs
+        .map((log) => (typeof log.rating === "number" && log.rating > 0 ? log.rating : null))
+        .filter((rating): rating is number => rating !== null);
+      const averageRating = ratings.length
+        ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length) * 10) / 10
         : 0;
-      
+
+      const rpes = logs
+        .map((log) => (typeof log.rpe === "number" && log.rpe > 0 ? log.rpe : null))
+        .filter((rpe): rpe is number => rpe !== null);
+      const averageRpe = rpes.length
+        ? Math.round((rpes.reduce((sum, rpe) => sum + rpe, 0) / rpes.length) * 10) / 10
+        : 0;
+
+      const totalMinutes = Math.max(
+        0,
+        Math.round(
+          logsWithWorkouts.reduce(
+            (total, log) => total + resolveLogDurationMinutes(log),
+            0,
+          ),
+        ),
+      );
+
+      const totalCalories = Math.max(
+        0,
+        Math.round(
+          logs.reduce(
+            (total, log) =>
+              typeof log.caloriesBurned === "number" && Number.isFinite(log.caloriesBurned)
+                ? total + log.caloriesBurned
+                : total,
+            0,
+          ),
+        ),
+      );
+
+      const daysForWeek = Math.min(daysNumber, 7);
+      const weekStart = new Date(todayStart.getTime() - (daysForWeek - 1) * DAY_IN_MS);
+      const workoutsThisWeek = logs.filter((log) => {
+        if (!log.completedAt) {
+          return false;
+        }
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+        return completed >= weekStart;
+      }).length;
+
+      const logsWithNormalizedDates = logsWithWorkouts
+        .map((log) => {
+          if (!log.completedAt) {
+            return null;
+          }
+          const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+          const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+          return { log, normalized };
+        })
+        .filter((entry): entry is { log: WorkoutLogWithWorkout; normalized: Date } => entry !== null);
+
+      const totalWeeks = Math.max(1, Math.ceil(daysNumber / 7));
+      const weeklySummaries: Array<{
+        weekStart: string;
+        weekEnd: string;
+        workouts: number;
+        minutes: number;
+        avgRpe: number;
+        calories: number;
+      }> = [];
+
+      for (let weekIndex = 0; weekIndex < totalWeeks; weekIndex++) {
+        const segmentStart = new Date(windowStart.getTime() + weekIndex * 7 * DAY_IN_MS);
+        const segmentEndStart = new Date(
+          Math.min(todayStart.getTime(), segmentStart.getTime() + 6 * DAY_IN_MS),
+        );
+
+        const weekLogs = logsWithNormalizedDates.filter(
+          ({ normalized }) => normalized >= segmentStart && normalized <= segmentEndStart,
+        );
+
+        const weekMinutes = weekLogs.reduce(
+          (total, entry) => total + resolveLogDurationMinutes(entry.log),
+          0,
+        );
+        const weekCalories = weekLogs.reduce(
+          (total, entry) =>
+            typeof entry.log.caloriesBurned === "number" && Number.isFinite(entry.log.caloriesBurned)
+              ? total + entry.log.caloriesBurned
+              : total,
+          0,
+        );
+        const weekRpes = weekLogs
+          .map((entry) =>
+            typeof entry.log.rpe === "number" && entry.log.rpe > 0 ? entry.log.rpe : null,
+          )
+          .filter((value): value is number => value !== null);
+
+        weeklySummaries.push({
+          weekStart: segmentStart.toISOString(),
+          weekEnd: segmentEndStart.toISOString(),
+          workouts: weekLogs.length,
+          minutes: Math.max(0, Math.round(weekMinutes)),
+          avgRpe: weekRpes.length
+            ? Math.round((weekRpes.reduce((sum, value) => sum + value, 0) / weekRpes.length) * 10) / 10
+            : 0,
+          calories: Math.max(0, Math.round(weekCalories)),
+        });
+      }
+
+      const tagCounts = new Map<string, number>();
+      for (const log of logs) {
+        if (!Array.isArray(log.tags)) {
+          continue;
+        }
+        for (const rawTag of log.tags) {
+          if (typeof rawTag !== "string") {
+            continue;
+          }
+          const trimmed = rawTag.trim();
+          if (!trimmed) {
+            continue;
+          }
+          const normalized = trimmed.toLowerCase();
+          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
+        }
+      }
+
+      const tagBreakdown = Array.from(tagCounts.entries())
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => {
+          if (b.count === a.count) {
+            return a.tag.localeCompare(b.tag);
+          }
+          return b.count - a.count;
+        });
+
       res.json({
         dailyStats,
         totalWorkouts,
-        averageRating: Math.round(averageRating * 10) / 10,
+        averageRating,
         currentStreak: calculateCurrentStreak(logs),
+        workoutsThisWeek,
+        totalMinutes,
+        averageRpe,
+        totalCalories,
+        tagBreakdown,
+        weeklySummaries,
+        rangeDays: daysNumber,
       });
     } catch (error) {
       console.error("Error fetching progress:", error);
@@ -333,25 +745,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   return httpServer;
 }
 
-function calculateCurrentStreak(logs: any[]): number {
-  if (logs.length === 0) return 0;
-  
+function calculateCurrentStreak(logs: WorkoutLog[]): number {
+  if (logs.length === 0) {
+    return 0;
+  }
+
   const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const loggedDates = new Set(
+    logs
+      .filter((log) => log.completedAt)
+      .map((log) => {
+        const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt!);
+        const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+        return normalized.toDateString();
+      }),
+  );
+
   let streak = 0;
-  
-  for (let i = 0; i < 30; i++) { // Check last 30 days
-    const checkDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
-    const hasWorkout = logs.some(log => {
-      const logDate = new Date(log.completedAt!);
-      return logDate.toDateString() === checkDate.toDateString();
-    });
-    
-    if (hasWorkout) {
+  for (let i = 0; i < 30; i++) {
+    const checkDate = new Date(todayStart.getTime() - i * DAY_IN_MS);
+    const key = checkDate.toDateString();
+    if (loggedDates.has(key)) {
       streak++;
-    } else if (i > 0) { // Allow today to be without workout
+    } else if (i > 0) {
       break;
     }
   }
-  
+
   return streak;
 }

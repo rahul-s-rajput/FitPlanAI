@@ -1,99 +1,263 @@
-import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Calendar, Clock, TrendingUp, Award } from "lucide-react";
+import { Calendar, Clock, TrendingUp, Award, Flame, Gauge } from "lucide-react";
 import { ProgressChart } from "@/components/ProgressChart";
 import { StatsCard } from "@/components/StatsCard";
 import { WorkoutLogCard } from "@/components/WorkoutLogCard";
-import { WorkoutLog } from "@shared/schema";
+import { useQuery } from "@tanstack/react-query";
+import type { Workout, WorkoutLog } from "@shared/schema";
+import { getJson } from "@/lib/api";
+
+type WorkoutLogWithWorkout = Omit<WorkoutLog, "completedAt"> & {
+  completedAt: string | null;
+  workout: (Workout & Record<string, unknown>) | null;
+};
+
+interface TagBreakdownItem {
+  tag: string;
+  count: number;
+}
+
+interface WeeklySummary {
+  weekStart: string;
+  weekEnd: string;
+  workouts: number;
+  minutes: number;
+  avgRpe: number;
+  calories: number;
+}
+
+interface ProgressResponse {
+  dailyStats: Array<{ date: string; workouts: number; streak: number }>;
+  totalWorkouts: number;
+  averageRating: number;
+  currentStreak: number;
+  workoutsThisWeek: number;
+  totalMinutes: number;
+  averageRpe: number;
+  totalCalories: number;
+  tagBreakdown: TagBreakdownItem[];
+  weeklySummaries: WeeklySummary[];
+  rangeDays: number;
+}
 
 export default function ProgressPage() {
-  // todo: remove mock functionality
-  const [recentLogs] = useState<WorkoutLog[]>([
-    {
-      id: "1",
-      userId: "user1",
-      workoutId: "workout1",
-      completedAt: new Date(Date.now() - 86400000), // yesterday
-      exercises: [
-        { name: "Push-ups", sets: 3, reps: 15 },
-        { name: "Squats", sets: 3, reps: 20 },
-      ],
-      notes: "Great workout! Felt strong today.",
-      rating: 5,
-    },
-    {
-      id: "2",
-      userId: "user1",
-      workoutId: "workout2", 
-      completedAt: new Date(Date.now() - 172800000), // 2 days ago
-      exercises: [
-        { name: "Dumbbell Press", sets: 3, reps: 12 },
-        { name: "Lunges", sets: 3, reps: 10 },
-      ],
-      notes: "Challenging but manageable.",
-      rating: 4,
-    },
-  ]);
+  const progressQuery = useQuery<ProgressResponse>({
+    queryKey: ["progress", 28],
+    queryFn: () => getJson<ProgressResponse>("/api/progress?days=28"),
+    staleTime: 60_000,
+  });
 
-  const progressData = [
-    { date: "Mon", workouts: 1, streak: 1 },
-    { date: "Tue", workouts: 0, streak: 0 },
-    { date: "Wed", workouts: 1, streak: 1 },
-    { date: "Thu", workouts: 1, streak: 2 },
-    { date: "Fri", workouts: 0, streak: 0 },
-    { date: "Sat", workouts: 1, streak: 1 },
-    { date: "Sun", workouts: 1, streak: 2 },
-  ];
+  const logsQuery = useQuery<WorkoutLogWithWorkout[]>({
+    queryKey: ["workout-logs", 5],
+    queryFn: () => getJson<WorkoutLogWithWorkout[]>("/api/workout-logs?limit=5"),
+    staleTime: 60_000,
+  });
+
+  const progress = progressQuery.data;
+  const progressLoading = progressQuery.isLoading;
+  const progressHasError = Boolean(progressQuery.error);
+
+  const workoutLogs = logsQuery.data ?? [];
+  const logsHasError = Boolean(logsQuery.error);
+  const recentLogs = workoutLogs.map((log) => ({
+    ...log,
+    completedAt: log.completedAt ? new Date(log.completedAt) : null,
+  }));
 
   const handleViewDetails = (logId: string) => {
     console.log("View workout log details:", logId);
   };
 
+  const chartData = progress?.dailyStats ?? [];
+
+  const getDisplayValue = (value: number | string) =>
+    typeof value === "number" ? value.toLocaleString() : value;
+
+  const currentStreakValue = progress
+    ? progress.currentStreak
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : 0;
+  const workoutsThisWeekValue = progress
+    ? progress.workoutsThisWeek
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : 0;
+  const totalMinutesRaw = progress
+    ? progress.totalMinutes
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : 0;
+  const totalMinutesValue = getDisplayValue(totalMinutesRaw);
+  const totalCaloriesRaw = progress
+    ? progress.totalCalories
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : 0;
+  const totalCaloriesValue = getDisplayValue(totalCaloriesRaw);
+  const averageRatingValue = progress
+    ? progress.averageRating.toFixed(1)
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : "0.0";
+  const averageRpeValue = progress
+    ? progress.averageRpe.toFixed(1)
+    : progressLoading
+      ? "…"
+      : progressHasError
+        ? "—"
+        : "0.0";
+
+  const weeklySummaryRows = progress
+    ? progress.weeklySummaries
+        .slice()
+        .reverse()
+        .map((summary) => ({
+          ...summary,
+          weekStartDate: new Date(summary.weekStart),
+          weekEndDate: new Date(summary.weekEnd),
+        }))
+    : [];
+  const topTags = progress ? progress.tagBreakdown.slice(0, 6) : [];
+
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="p-4 space-y-6">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <StatsCard
             title="Current Streak"
-            value="5"
+            value={currentStreakValue}
             subtitle="days"
             icon={Award}
-            trend={{ value: 25, label: "vs last week" }}
           />
           <StatsCard
             title="This Week"
-            value="4"
+            value={workoutsThisWeekValue}
             subtitle="workouts"
             icon={Calendar}
-            trend={{ value: 33, label: "vs last week" }}
           />
           <StatsCard
             title="Total Time"
-            value="120"
-            subtitle="minutes"
+            value={totalMinutesValue}
+            subtitle="minutes logged"
             icon={Clock}
-            trend={{ value: 15, label: "vs last week" }}
           />
           <StatsCard
             title="Avg Rating"
-            value="4.2"
+            value={averageRatingValue}
             subtitle="out of 5"
             icon={TrendingUp}
-            trend={{ value: 5, label: "vs last week" }}
+          />
+          <StatsCard
+            title="Avg RPE"
+            value={averageRpeValue}
+            subtitle="per session"
+            icon={Gauge}
+          />
+          <StatsCard
+            title="Calories"
+            value={totalCaloriesValue}
+            subtitle="burned"
+            icon={Flame}
           />
         </div>
 
-        <ProgressChart 
-          data={progressData} 
-          title="Weekly Activity"
-        />
+        {progressHasError ? (
+          <Card>
+            <CardContent className="py-8 text-center text-sm text-destructive">
+              Unable to load progress overview. Please try again later.
+            </CardContent>
+          </Card>
+        ) : (
+          <ProgressChart
+            data={chartData}
+            title="Activity Trend"
+            rangeLabel={progress ? `Last ${progress.rangeDays} days` : undefined}
+            summary={progress ? `${progress.workoutsThisWeek} workouts this week` : undefined}
+          />
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Weekly Breakdown</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {progressLoading ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                Calculating weekly insights…
+              </div>
+            ) : progressHasError ? (
+              <div className="text-center py-6 text-sm text-destructive">
+                Unable to load weekly insights.
+              </div>
+            ) : weeklySummaryRows.length === 0 ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                No workouts logged in this time window.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-muted-foreground uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left py-2">Week</th>
+                      <th className="text-right py-2">Workouts</th>
+                      <th className="text-right py-2">Minutes</th>
+                      <th className="text-right py-2">Avg RPE</th>
+                      <th className="text-right py-2">Calories</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {weeklySummaryRows.map((summary) => {
+                      const rangeLabel = `${summary.weekStartDate.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })} – ${summary.weekEndDate.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}`;
+
+                      return (
+                        <tr key={summary.weekStart}>
+                          <td className="py-2">{rangeLabel}</td>
+                          <td className="py-2 text-right">{summary.workouts}</td>
+                          <td className="py-2 text-right">{summary.minutes.toLocaleString()}</td>
+                          <td className="py-2 text-right">{summary.avgRpe.toFixed(1)}</td>
+                          <td className="py-2 text-right">{summary.calories.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Recent Workouts</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {recentLogs.length === 0 ? (
+            {logsQuery.isLoading ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                Loading your recent activity…
+              </div>
+            ) : logsHasError ? (
+              <div className="text-center py-8 text-sm text-destructive">
+                Unable to load workout history right now.
+              </div>
+            ) : recentLogs.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-muted-foreground">No workouts completed yet</p>
                 <p className="text-sm text-muted-foreground mt-2">
@@ -105,10 +269,40 @@ export default function ProgressPage() {
                 <WorkoutLogCard
                   key={log.id}
                   log={log}
-                  workoutName={`Workout ${log.workoutId}`}
+                  workoutName={log.workout?.name ?? undefined}
                   onViewDetails={handleViewDetails}
                 />
               ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Training Focus</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {progressLoading ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                Analyzing your workout tags…
+              </div>
+            ) : progressHasError ? (
+              <div className="text-center py-6 text-sm text-destructive">
+                Unable to load focus areas.
+              </div>
+            ) : topTags.length === 0 ? (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                Tag your workouts to surface focus areas and trends.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {topTags.map((tag) => (
+                  <Badge key={tag.tag} variant="secondary" className="text-xs">
+                    #{tag.tag}
+                    <span className="ml-1 text-muted-foreground">({tag.count})</span>
+                  </Badge>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

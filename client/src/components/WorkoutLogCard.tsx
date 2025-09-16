@@ -1,11 +1,11 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckCircle, Clock, Star, Calendar } from "lucide-react";
-import { WorkoutLog } from "@shared/schema";
+import { CheckCircle, Clock, Star, Calendar, Gauge, Flame, Tag } from "lucide-react";
+import type { Workout, WorkoutLog } from "@shared/schema";
 
 interface WorkoutLogCardProps {
-  log: WorkoutLog;
+  log: WorkoutLog & { workout?: (Workout & Record<string, unknown>) | null };
   workoutName?: string;
   onViewDetails?: (logId: string) => void;
 }
@@ -18,13 +18,29 @@ export function WorkoutLogCard({ log, workoutName, onViewDetails }: WorkoutLogCa
 
   const formatDate = (date: Date | string) => {
     const d = new Date(date);
-    return d.toLocaleDateString("en-US", { 
-      month: "short", 
+    return d.toLocaleDateString("en-US", {
+      month: "short",
       day: "numeric",
       hour: "2-digit",
-      minute: "2-digit"
+      minute: "2-digit",
     });
   };
+
+  const completedAtLabel = log.completedAt ? formatDate(log.completedAt) : "Not completed";
+  const durationMinutes = typeof log.durationMinutes === "number" && log.durationMinutes > 0
+    ? log.durationMinutes
+    : typeof log.workout?.estimatedDuration === "number"
+      ? log.workout.estimatedDuration
+      : null;
+  const caloriesBurned = typeof log.caloriesBurned === "number" && log.caloriesBurned > 0
+    ? log.caloriesBurned
+    : null;
+  const perceivedExertion = typeof log.rpe === "number" && log.rpe > 0 ? log.rpe : null;
+  const tagList = Array.isArray(log.tags)
+    ? log.tags
+        .map((tag) => (typeof tag === "string" ? tag.trim() : ""))
+        .filter((tag) => tag.length > 0)
+    : [];
 
   return (
     <Card className="p-4 hover-elevate" data-testid={`card-workout-log-${log.id}`}>
@@ -40,7 +56,7 @@ export function WorkoutLogCard({ log, workoutName, onViewDetails }: WorkoutLogCa
               </h3>
               <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                 <Calendar className="h-3 w-3" />
-                <span>{formatDate(log.completedAt!)}</span>
+                <span>{completedAtLabel}</span>
               </div>
             </div>
           </div>
@@ -66,6 +82,43 @@ export function WorkoutLogCard({ log, workoutName, onViewDetails }: WorkoutLogCa
           <p className="text-sm text-muted-foreground line-clamp-2">
             {log.notes}
           </p>
+        )}
+
+        {(durationMinutes !== null || perceivedExertion !== null || caloriesBurned !== null) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            {durationMinutes !== null && (
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {durationMinutes} min
+              </span>
+            )}
+            {perceivedExertion !== null && (
+              <span className="flex items-center gap-1">
+                <Gauge className="h-3 w-3" />
+                RPE {perceivedExertion}
+              </span>
+            )}
+            {caloriesBurned !== null && (
+              <span className="flex items-center gap-1">
+                <Flame className="h-3 w-3" />
+                {caloriesBurned} kcal
+              </span>
+            )}
+          </div>
+        )}
+
+        {tagList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Tag className="h-3 w-3" />
+              Focus
+            </span>
+            {tagList.map((tag) => (
+              <Badge key={`${log.id}-${tag}`} variant="outline" className="text-xs capitalize">
+                #{tag}
+              </Badge>
+            ))}
+          </div>
         )}
 
         <div className="flex items-center justify-between">

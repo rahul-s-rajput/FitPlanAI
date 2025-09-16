@@ -10,9 +10,14 @@ interface ProgressData {
 interface ProgressChartProps {
   data: ProgressData[];
   title: string;
+  rangeLabel?: string;
+  summary?: string;
 }
 
-export function ProgressChart({ data, title }: ProgressChartProps) {
+export function ProgressChart({ data, title, rangeLabel, summary }: ProgressChartProps) {
+  const resolvedRangeLabel = rangeLabel ?? (data.length > 0 ? `Last ${data.length} days` : "No data yet");
+  const resolvedSummary = summary ?? `${data[data.length - 1]?.workouts ?? 0} workouts logged`;
+
   return (
     <Card data-testid="card-progress-chart">
       <CardHeader className="pb-2">
@@ -48,8 +53,8 @@ export function ProgressChart({ data, title }: ProgressChartProps) {
           </ResponsiveContainer>
         </div>
         <div className="flex items-center justify-between text-sm text-muted-foreground mt-2">
-          <span>Last 7 days</span>
-          <span>{data[data.length - 1]?.workouts || 0} workouts this week</span>
+          <span>{resolvedRangeLabel}</span>
+          <span>{resolvedSummary}</span>
         </div>
       </CardContent>
     </Card>
