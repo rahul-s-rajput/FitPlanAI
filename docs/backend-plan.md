@@ -19,7 +19,7 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 ## 3. Data Persistence Layer
 - [x] Replace in-memory storage with PostgreSQL via Drizzle ORM.
 - [x] Implement migrations for equipment, workout plans, workouts, logs, and users.
-- [ ] Add seed scripts for demo data and integration testing.
+- [x] Add seed scripts for demo data and integration testing.
 
 ## 4. Authentication & User Management
 - [ ] Implement session-backed auth (passport-local or email magic link).
@@ -46,9 +46,12 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 ### Immediate Next Steps
 - [x] Persist nutritional guidance and AI metadata alongside generated workout plans so it can be revisited later.
 - [x] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
-- [ ] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
+- [x] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
 - [ ] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
 
-With AI metadata now stored, the next iteration can focus on wiring the plan repository to Drizzle and enriching logging validation so the client can rely on durable history.
+With the demo environment now seeded end-to-end, the next iteration can focus on enriching the workout logging APIs and wiring the frontend activity tracker to the persisted history.
+
+#### Seed utility
+- Run `npm run db:seed` after migrations to reset the demo account with curated equipment, the Strong at Home plan, associated workouts, and a week of representative workout logs.
 
 These steps will unlock end-to-end plan generation using the free OpenRouter models while keeping the path open for persistent storage and authentication in subsequent iterations.
