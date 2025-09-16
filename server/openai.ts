@@ -1,7 +1,11 @@
 import OpenAI from "openai";
 import { Equipment, WorkoutPlan } from "@shared/schema";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+// Using stable GPT-4 model for reliable workout plan generation
+if (!process.env.OPENAI_API_KEY) {
+  throw new Error("OPENAI_API_KEY environment variable is required");
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 interface WorkoutPlanRequest {
@@ -37,6 +41,14 @@ export async function generateWorkoutPlan(request: WorkoutPlanRequest): Promise<
   workouts: GeneratedWorkout[];
   nutritionalGuidance: string;
 }> {
+  // Validate input data
+  if (!request.goals || request.goals.length === 0) {
+    throw new Error("At least one fitness goal is required");
+  }
+  if (request.weeklyMinutes <= 0 || request.dailyMinutes <= 0) {
+    throw new Error("Weekly and daily minutes must be greater than 0");
+  }
+
   const equipmentList = request.equipment.map(eq => 
     `${eq.name} (${eq.type}${eq.weight ? `, ${eq.weight}kg` : ''}${eq.quantity > 1 ? `, x${eq.quantity}` : ''})`
   ).join(', ');
@@ -91,7 +103,7 @@ Respond in JSON format with this structure:
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4",
       messages: [
         {
           role: "system",
@@ -106,11 +118,68 @@ Respond in JSON format with this structure:
       temperature: 0.7,
     });
 
-    const result = JSON.parse(response.choices[0].message.content!);
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error("No content received from OpenAI");
+    }
+
+    let result;
+    try {
+      result = JSON.parse(content);
+    } catch (parseError) {
+      console.error("Failed to parse OpenAI response:", parseError);
+      throw new Error("Invalid response format from AI service");
+    }
+
+    // Validate the generated plan structure
+    if (!result.name || !result.description || !Array.isArray(result.workouts)) {
+      throw new Error("Generated plan is missing required fields");
+    }
+
+    // Validate each workout
+    for (const workout of result.workouts) {
+      if (!workout.name || !workout.description || !Array.isArray(workout.exercises)) {
+        throw new Error("Generated workout is missing required fields");
+      }
+      if (typeof workout.dayOfWeek !== 'number' || workout.dayOfWeek < 0 || workout.dayOfWeek > 6) {
+        throw new Error("Invalid dayOfWeek in generated workout");
+      }
+      if (typeof workout.estimatedDuration !== 'number' || workout.estimatedDuration <= 0) {
+        throw new Error("Invalid estimatedDuration in generated workout");
+      }
+      // Validate exercises
+      for (const exercise of workout.exercises) {
+        if (!exercise.name || !exercise.instructions) {
+          throw new Error("Generated exercise is missing required fields");
+        }
+      }
+    }
+
     return result;
   } catch (error) {
+    if (error instanceof Error) {
+      // Re-throw our custom validation errors
+      if (error.message.includes("required") || error.message.includes("Invalid") || error.message.includes("missing")) {
+        throw error;
+      }
+    }
+    
     console.error("Error generating workout plan:", error);
-    throw new Error("Failed to generate workout plan. Please try again.");
+    
+    // Handle different types of OpenAI errors
+    if (error instanceof Error) {
+      if (error.message.includes("API key")) {
+        throw new Error("OpenAI API key is invalid or missing");
+      }
+      if (error.message.includes("rate limit")) {
+        throw new Error("AI service is temporarily overloaded. Please try again in a moment.");
+      }
+      if (error.message.includes("model")) {
+        throw new Error("AI model is temporarily unavailable");
+      }
+    }
+    
+    throw new Error("AI service is temporarily unavailable. Please try again later.");
   }
 }
 
@@ -128,7 +197,7 @@ export async function generateNutritionalGuidance(goals: string[], restrictions?
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4",
       messages: [
         {
           role: "system", 
