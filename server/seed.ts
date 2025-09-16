@@ -261,6 +261,10 @@ async function seedDemoData(): Promise<SeedSummary> {
         ],
         notes: "Focused on slow eccentrics; lunges were challenging but form stayed tight.",
         rating: 4,
+        rpe: 7,
+        durationMinutes: 38,
+        caloriesBurned: 320,
+        tags: ["strength", "lower-body"],
       },
       {
         id: "demo-log-strong-at-home-2",
@@ -274,6 +278,10 @@ async function seedDemoData(): Promise<SeedSummary> {
         ],
         notes: "Strong lockout on presses; shoulder felt stable throughout.",
         rating: 5,
+        rpe: 8,
+        durationMinutes: 34,
+        caloriesBurned: 285,
+        tags: ["strength", "upper-body"],
       },
       {
         id: "demo-log-strong-at-home-3",
@@ -287,6 +295,10 @@ async function seedDemoData(): Promise<SeedSummary> {
         ],
         notes: "Conditioning flow elevated heart rate; added extra mobility between rounds.",
         rating: 3,
+        rpe: 6,
+        durationMinutes: 31,
+        caloriesBurned: 260,
+        tags: ["conditioning", "mobility"],
       },
       {
         id: "demo-log-strong-at-home-recovery",
@@ -298,6 +310,10 @@ async function seedDemoData(): Promise<SeedSummary> {
         ],
         notes: "Used as active recovery between strength days.",
         rating: 4,
+        rpe: 3,
+        durationMinutes: 25,
+        caloriesBurned: 150,
+        tags: ["recovery", "cardio"],
       },
     ];
 

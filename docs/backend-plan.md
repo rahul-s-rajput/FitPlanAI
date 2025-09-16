@@ -27,7 +27,7 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 - [ ] Provide account creation and profile management endpoints.
 
 ## 5. Activity Logging & Analytics
-- [ ] Expand workout log schema to track RPE, duration, calories, and tags.
+- [x] Expand workout log schema to track RPE, duration, calories, and tags.
 - [ ] Build reporting endpoints for streaks, volume, and compliance metrics.
 - [ ] Integrate habit streak engine (grace periods, catch-up logic).
 
@@ -49,7 +49,7 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 - [x] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
 - [x] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
 
-With the workout history now flowing from the database into the activity tracker, the next iteration can focus on deeper analytics (RPE, duration, calorie tracking) and exposing richer summaries across multiple weeks.
+With the workout history now flowing from the database into the activity tracker and richer metrics (RPE, duration, calorie tracking, tags) captured for every log, the next iteration can focus on compliance insights and habit streak logic across extended ranges.
 
 #### Seed utility
 - Run `npm run db:seed` after migrations to reset the demo account with curated equipment, the Strong at Home plan, associated workouts, and a week of representative workout logs.

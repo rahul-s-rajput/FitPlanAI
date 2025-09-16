@@ -49,6 +49,10 @@ export const workoutLogs = pgTable("workout_logs", {
   exercises: jsonb("exercises"), // actual performed exercises
   notes: text("notes"),
   rating: integer("rating"), // 1-5 difficulty/satisfaction
+  rpe: integer("rpe"), // Rating of perceived exertion (1-10)
+  durationMinutes: integer("duration_minutes"),
+  caloriesBurned: integer("calories_burned"),
+  tags: text("tags").array(),
 });
 
 // Insert schemas
@@ -122,6 +126,46 @@ const workoutLogBaseSchema = z.object({
       if (value === null || value === "") return null;
       return value;
     }, z.union([z.coerce.number().int().min(1).max(5), z.null()]))
+    .optional(),
+  rpe: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      return value;
+    }, z.union([z.coerce.number().int().min(1).max(10), z.null()]))
+    .optional(),
+  durationMinutes: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      return value;
+    }, z.union([z.coerce.number().int().min(1).max(600), z.null()]))
+    .optional(),
+  caloriesBurned: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      return value;
+    }, z.union([z.coerce.number().int().min(0).max(5000), z.null()]))
+    .optional(),
+  tags: z
+    .preprocess((value) => {
+      if (value === undefined) return undefined;
+      if (value === null) return null;
+      return value;
+    },
+    z.union([
+      z
+        .array(
+          z
+            .string()
+            .trim()
+            .min(1, "Tags must be at least 1 character")
+            .max(30, "Tags must be 30 characters or fewer"),
+        )
+        .max(8, "Limit of 8 tags per workout log"),
+      z.null(),
+    ]))
     .optional(),
 });
 

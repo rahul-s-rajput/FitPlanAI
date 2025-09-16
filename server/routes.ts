@@ -14,6 +14,8 @@ import { z } from "zod";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
+type WorkoutLogWithWorkout = WorkoutLog & { workout: Workout | null };
+
 export async function registerRoutes(app: Express): Promise<Server> {
   const DEMO_USER_USERNAME = "demo-user";
   const FALLBACK_DEMO_USER_ID = "demo-user";
@@ -103,6 +105,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   function getExerciseCount(exercises: unknown): number {
     return Array.isArray(exercises) ? exercises.length : 0;
+  }
+
+  function calculateExerciseDurationMinutes(exercises: unknown): number {
+    if (!Array.isArray(exercises)) {
+      return 0;
+    }
+
+    return Math.round(
+      exercises.reduce((total, exercise) => {
+        if (!exercise || typeof exercise !== "object") {
+          return total;
+        }
+
+        const entry = exercise as Record<string, unknown>;
+        const minutesFromMinutes = typeof entry.durationMinutes === "number" ? entry.durationMinutes : undefined;
+        const minutesFromGeneric = typeof entry.duration === "number" ? entry.duration : undefined;
+        const minutesFromSeconds = typeof entry.durationSeconds === "number"
+          ? Math.round(entry.durationSeconds / 60)
+          : undefined;
+
+        const derivedMinutes = minutesFromMinutes ?? minutesFromGeneric ?? minutesFromSeconds ?? 0;
+        return total + (Number.isFinite(derivedMinutes) ? derivedMinutes : 0);
+      }, 0),
+    );
+  }
+
+  function resolveLogDurationMinutes(log: WorkoutLogWithWorkout): number {
+    if (typeof log.durationMinutes === "number" && Number.isFinite(log.durationMinutes)) {
+      return Math.max(0, Math.round(log.durationMinutes));
+    }
+
+    const workoutDuration = log.workout?.estimatedDuration;
+    if (typeof workoutDuration === "number" && Number.isFinite(workoutDuration)) {
+      return Math.max(0, Math.round(workoutDuration));
+    }
+
+    return Math.max(0, calculateExerciseDurationMinutes(log.exercises));
   }
 
   // Equipment endpoints
@@ -515,25 +554,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const daysNumber = queryValidation.data.days ?? 7;
-    const endDate = new Date();
-    const startDate = new Date(endDate.getTime() - (daysNumber - 1) * DAY_IN_MS);
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const windowStart = new Date(todayStart.getTime() - (daysNumber - 1) * DAY_IN_MS);
+    const windowEnd = new Date(todayStart.getTime() + DAY_IN_MS - 1);
 
     try {
-      const logs = await storage.getWorkoutLogsByDateRange(demoUserId, startDate, endDate);
+      const logs = await storage.getWorkoutLogsByDateRange(demoUserId, windowStart, windowEnd);
       const logsWithWorkouts = await enrichLogsWithWorkouts(logs);
 
       const logDateCounts = new Map<string, number>();
       for (const log of logs) {
         if (!log.completedAt) continue;
         const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
-        const key = completed.toDateString();
+        const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+        const key = normalized.toDateString();
         logDateCounts.set(key, (logDateCounts.get(key) ?? 0) + 1);
       }
 
       const dailyStats: Array<{ date: string; workouts: number; streak: number }> = [];
       let runningStreak = 0;
       for (let i = daysNumber - 1; i >= 0; i--) {
-        const currentDate = new Date(endDate.getTime() - i * DAY_IN_MS);
+        const currentDate = new Date(todayStart.getTime() - i * DAY_IN_MS);
         const key = currentDate.toDateString();
         const workoutsForDay = logDateCounts.get(key) ?? 0;
         runningStreak = workoutsForDay > 0 ? runningStreak + 1 : 0;
@@ -553,8 +595,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length) * 10) / 10
         : 0;
 
+      const rpes = logs
+        .map((log) => (typeof log.rpe === "number" && log.rpe > 0 ? log.rpe : null))
+        .filter((rpe): rpe is number => rpe !== null);
+      const averageRpe = rpes.length
+        ? Math.round((rpes.reduce((sum, rpe) => sum + rpe, 0) / rpes.length) * 10) / 10
+        : 0;
+
+      const totalMinutes = Math.max(
+        0,
+        Math.round(
+          logsWithWorkouts.reduce(
+            (total, log) => total + resolveLogDurationMinutes(log),
+            0,
+          ),
+        ),
+      );
+
+      const totalCalories = Math.max(
+        0,
+        Math.round(
+          logs.reduce(
+            (total, log) =>
+              typeof log.caloriesBurned === "number" && Number.isFinite(log.caloriesBurned)
+                ? total + log.caloriesBurned
+                : total,
+            0,
+          ),
+        ),
+      );
+
       const daysForWeek = Math.min(daysNumber, 7);
-      const weekStart = new Date(endDate.getTime() - (daysForWeek - 1) * DAY_IN_MS);
+      const weekStart = new Date(todayStart.getTime() - (daysForWeek - 1) * DAY_IN_MS);
       const workoutsThisWeek = logs.filter((log) => {
         if (!log.completedAt) {
           return false;
@@ -563,36 +635,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return completed >= weekStart;
       }).length;
 
-      const totalMinutes = logsWithWorkouts.reduce((total, log) => {
-        if (log.workout?.estimatedDuration) {
-          return total + log.workout.estimatedDuration;
+      const logsWithNormalizedDates = logsWithWorkouts
+        .map((log) => {
+          if (!log.completedAt) {
+            return null;
+          }
+          const completed = log.completedAt instanceof Date ? log.completedAt : new Date(log.completedAt);
+          const normalized = new Date(completed.getFullYear(), completed.getMonth(), completed.getDate());
+          return { log, normalized };
+        })
+        .filter((entry): entry is { log: WorkoutLogWithWorkout; normalized: Date } => entry !== null);
+
+      const totalWeeks = Math.max(1, Math.ceil(daysNumber / 7));
+      const weeklySummaries: Array<{
+        weekStart: string;
+        weekEnd: string;
+        workouts: number;
+        minutes: number;
+        avgRpe: number;
+        calories: number;
+      }> = [];
+
+      for (let weekIndex = 0; weekIndex < totalWeeks; weekIndex++) {
+        const segmentStart = new Date(windowStart.getTime() + weekIndex * 7 * DAY_IN_MS);
+        const segmentEndStart = new Date(
+          Math.min(todayStart.getTime(), segmentStart.getTime() + 6 * DAY_IN_MS),
+        );
+
+        const weekLogs = logsWithNormalizedDates.filter(
+          ({ normalized }) => normalized >= segmentStart && normalized <= segmentEndStart,
+        );
+
+        const weekMinutes = weekLogs.reduce(
+          (total, entry) => total + resolveLogDurationMinutes(entry.log),
+          0,
+        );
+        const weekCalories = weekLogs.reduce(
+          (total, entry) =>
+            typeof entry.log.caloriesBurned === "number" && Number.isFinite(entry.log.caloriesBurned)
+              ? total + entry.log.caloriesBurned
+              : total,
+          0,
+        );
+        const weekRpes = weekLogs
+          .map((entry) =>
+            typeof entry.log.rpe === "number" && entry.log.rpe > 0 ? entry.log.rpe : null,
+          )
+          .filter((value): value is number => value !== null);
+
+        weeklySummaries.push({
+          weekStart: segmentStart.toISOString(),
+          weekEnd: segmentEndStart.toISOString(),
+          workouts: weekLogs.length,
+          minutes: Math.max(0, Math.round(weekMinutes)),
+          avgRpe: weekRpes.length
+            ? Math.round((weekRpes.reduce((sum, value) => sum + value, 0) / weekRpes.length) * 10) / 10
+            : 0,
+          calories: Math.max(0, Math.round(weekCalories)),
+        });
+      }
+
+      const tagCounts = new Map<string, number>();
+      for (const log of logs) {
+        if (!Array.isArray(log.tags)) {
+          continue;
         }
-
-        if (Array.isArray(log.exercises)) {
-          const exerciseMinutes = log.exercises.reduce((exerciseTotal, exercise) => {
-            if (!exercise || typeof exercise !== "object") {
-              return exerciseTotal;
-            }
-
-            const minutesFromMinutes = typeof (exercise as any).durationMinutes === "number"
-              ? (exercise as any).durationMinutes
-              : undefined;
-            const minutesFromGeneric = typeof (exercise as any).duration === "number"
-              ? (exercise as any).duration
-              : undefined;
-            const minutesFromSeconds = typeof (exercise as any).durationSeconds === "number"
-              ? Math.round((exercise as any).durationSeconds / 60)
-              : undefined;
-
-            const derivedMinutes = minutesFromMinutes ?? minutesFromGeneric ?? minutesFromSeconds ?? 0;
-            return exerciseTotal + derivedMinutes;
-          }, 0);
-
-          return total + exerciseMinutes;
+        for (const rawTag of log.tags) {
+          if (typeof rawTag !== "string") {
+            continue;
+          }
+          const trimmed = rawTag.trim();
+          if (!trimmed) {
+            continue;
+          }
+          const normalized = trimmed.toLowerCase();
+          tagCounts.set(normalized, (tagCounts.get(normalized) ?? 0) + 1);
         }
+      }
 
-        return total;
-      }, 0);
+      const tagBreakdown = Array.from(tagCounts.entries())
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => {
+          if (b.count === a.count) {
+            return a.tag.localeCompare(b.tag);
+          }
+          return b.count - a.count;
+        });
 
       res.json({
         dailyStats,
@@ -600,7 +728,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         averageRating,
         currentStreak: calculateCurrentStreak(logs),
         workoutsThisWeek,
-        totalMinutes: Math.max(0, Math.round(totalMinutes)),
+        totalMinutes,
+        averageRpe,
+        totalCalories,
+        tagBreakdown,
+        weeklySummaries,
+        rangeDays: daysNumber,
       });
     } catch (error) {
       console.error("Error fetching progress:", error);
