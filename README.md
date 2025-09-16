@@ -43,6 +43,36 @@ The repository is a single Vite workspace that serves the client UI and API from
    OPENROUTER_TIMEOUT_MS=60000
    ```
 
+
+   The example URL above targets a local Postgres instance; replace it with your managed provider string (for example,
+   `postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=require`) if you are using Neon or another hosted
+   option. The server validates these variables on startup, so make sure they are defined before running scripts.
+
+3. **Provision PostgreSQL**
+
+   FitPlanAI connects to a standard PostgreSQL database through the Node `pg` driver. Pick whichever option fits your
+   workflow and ensure the `DATABASE_URL` in your `.env` points at the running instance before running migrations:
+
+   - **Use a managed provider** – services like [Neon](https://neon.tech) offer free serverless Postgres instances. Copy
+     the provided connection string (it should include `?sslmode=require`) into your `.env` file.
+   - **Run Postgres locally** – if you have Docker installed, start a database with:
+
+     ```bash
+     docker run --name fitplanai-postgres \
+       -e POSTGRES_USER=postgres \
+       -e POSTGRES_PASSWORD=postgres \
+       -e POSTGRES_DB=fitplanai \
+       -p 5432:5432 \
+       -d postgres:16
+     ```
+
+     On Windows without Docker, install PostgreSQL locally and create a `fitplanai` database manually.
+
+   If `npm run db:push` reports `ECONNREFUSED`, double-check that the database server is running and accessible from your
+   machine.
+
+4. **Apply database migrations**
+=======
    The server validates these variables on startup, so make sure they are defined before running scripts.
 
 3. **Apply database migrations**
