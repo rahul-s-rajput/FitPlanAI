@@ -6,6 +6,7 @@ import { StatsCard } from "@/components/StatsCard";
 import { WorkoutLogCard } from "@/components/WorkoutLogCard";
 import { useQuery } from "@tanstack/react-query";
 import type { Workout, WorkoutLog } from "@shared/schema";
+import { getJson } from "@/lib/api";
 
 type WorkoutLogWithWorkout = Omit<WorkoutLog, "completedAt"> & {
   completedAt: string | null;
@@ -40,25 +41,16 @@ interface ProgressResponse {
   rangeDays: number;
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "include" });
-  if (!res.ok) {
-    const message = await res.text();
-    throw new Error(message || `Request failed with status ${res.status}`);
-  }
-  return res.json() as Promise<T>;
-}
-
 export default function ProgressPage() {
   const progressQuery = useQuery<ProgressResponse>({
     queryKey: ["progress", 28],
-    queryFn: () => fetchJson<ProgressResponse>("/api/progress?days=28"),
+    queryFn: () => getJson<ProgressResponse>("/api/progress?days=28"),
     staleTime: 60_000,
   });
 
   const logsQuery = useQuery<WorkoutLogWithWorkout[]>({
     queryKey: ["workout-logs", 5],
-    queryFn: () => fetchJson<WorkoutLogWithWorkout[]>("/api/workout-logs?limit=5"),
+    queryFn: () => getJson<WorkoutLogWithWorkout[]>("/api/workout-logs?limit=5"),
     staleTime: 60_000,
   });
 

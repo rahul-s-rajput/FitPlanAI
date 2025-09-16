@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, Target, Play } from "lucide-react";
+import { Calendar, Clock, Target, Play, Sparkles } from "lucide-react";
 import { WorkoutPlan } from "@shared/schema";
 
 interface WorkoutPlanCardProps {
@@ -20,6 +20,8 @@ export function WorkoutPlanCard({ plan, onStart, onEdit }: WorkoutPlanCardProps)
     console.log("Edit workout plan:", plan.id);
     onEdit?.(plan);
   };
+
+  const hasAiMetadata = plan.aiMetadata !== null && plan.aiMetadata !== undefined;
 
   return (
     <Card className="p-4 hover-elevate" data-testid={`card-workout-plan-${plan.id}`}>
@@ -45,7 +47,12 @@ export function WorkoutPlanCard({ plan, onStart, onEdit }: WorkoutPlanCardProps)
           </Button>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          {hasAiMetadata && (
+            <Badge variant="outline" className="gap-1 text-xs">
+              <Sparkles className="h-3 w-3" /> AI Generated
+            </Badge>
+          )}
           {plan.goals?.map((goal) => (
             <Badge key={goal} variant="secondary" className="text-xs">
               <Target className="h-3 w-3 mr-1" />
@@ -53,6 +60,12 @@ export function WorkoutPlanCard({ plan, onStart, onEdit }: WorkoutPlanCardProps)
             </Badge>
           ))}
         </div>
+
+        {plan.nutritionalGuidance && (
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {plan.nutritionalGuidance}
+          </p>
+        )}
 
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <div className="flex items-center gap-4">

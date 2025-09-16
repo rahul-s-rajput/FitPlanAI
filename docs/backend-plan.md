@@ -48,6 +48,7 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 - [x] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
 - [x] Add database seed scripts so the demo environment has starter equipment, workout plans, and logs.
 - [x] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
+- [x] Replace the equipment and workout plan screens with live API integrations covering create, edit, generate, and delete flows.
 
 With the workout history now flowing from the database into the activity tracker and richer metrics (RPE, duration, calorie tracking, tags) captured for every log, the next iteration can focus on compliance insights and habit streak logic across extended ranges.
 
