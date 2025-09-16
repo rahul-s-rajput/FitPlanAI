@@ -1,6 +1,8 @@
-import { z } from "zod";
 
-const envSchema = z
+import { z, type ZodIssue } from "zod";
+
+const envObjectSchema = z
+
   .object({
     DATABASE_URL: z
       .string()
@@ -18,13 +20,38 @@ const envSchema = z
       .positive()
       .max(120_000)
       .optional(),
+
+    SUPABASE_URL: z.string().url().optional(),
+    SUPABASE_ANON_KEY: z.string().optional(),
+    SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   })
   .passthrough();
+
+const envSchema = envObjectSchema.superRefine((data, ctx) => {
+  const supabaseValues = [
+    data.SUPABASE_URL,
+    data.SUPABASE_ANON_KEY,
+    data.SUPABASE_SERVICE_ROLE_KEY,
+  ];
+  const hasAnySupabaseConfig = supabaseValues.some((value) => value && value.length > 0);
+  const hasAllSupabaseConfig = supabaseValues.every((value) => value && value.length > 0);
+
+  if (hasAnySupabaseConfig && !hasAllSupabaseConfig) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY must all be defined when configuring Supabase",
+    });
+  }
+});
 
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-  const errorMessages = parsed.error.issues.map((issue) => issue.message).join(", ");
+  const errorMessages = parsed.error.issues
+    .map((issue: ZodIssue) => issue.message)
+    .join(", ");
+
   throw new Error(`Invalid environment configuration: ${errorMessages}`);
 }
 
@@ -40,4 +67,13 @@ export const config = {
     baseUrl: parsed.data.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
     requestTimeoutMs: parsed.data.OPENROUTER_TIMEOUT_MS ?? 60_000,
   },
+
+  supabase: parsed.data.SUPABASE_URL
+    ? {
+        url: parsed.data.SUPABASE_URL,
+        anonKey: parsed.data.SUPABASE_ANON_KEY!,
+        serviceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY!,
+      }
+    : undefined,
+
 };

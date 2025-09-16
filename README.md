@@ -15,7 +15,9 @@ The repository is a single Vite workspace that serves the client UI and API from
 
 - **Node.js** 18 or newer.
 - **npm** (ships with Node) for dependency management and scripts.
-- **PostgreSQL** database and connection string. The project uses the Neon HTTP driver by default, but any PostgreSQL-compatible connection URL works.
+
+- **PostgreSQL** database and connection string (local server, Docker container, or a managed provider such as Supabase).
+
 - **OpenRouter** API key for generating workout plans and nutrition guidance with free community models.
 
 ## Installation
@@ -26,35 +28,37 @@ The repository is a single Vite workspace that serves the client UI and API from
    npm install
    ```
 
-2. **Create an environment file**
+2. **Configure environment variables**
 
-   Create a `.env` file in the project root and populate the required variables:
+   Copy the sample file and fill in the values that apply to your setup:
 
-   ```ini
-   # Required
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/fitplanai
-   OPENROUTER_API_KEY=sk-or-...
-
-   # Optional overrides
-   OPENROUTER_MODEL=openai/gpt-oss-120b:free
-   OPENROUTER_SITE_URL=https://fitplanai.local
-   OPENROUTER_APP_TITLE=FitPlanAI
-   OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-   OPENROUTER_TIMEOUT_MS=60000
+   ```bash
+   cp .env.example .env
    ```
 
+   - **`DATABASE_URL`** – points to the Postgres instance backing the app. When hosting on Supabase, open
+     _Project Settings → Database_, copy the **Connection string** for pooled connections, and paste it into
+     `.env`. Supabase URIs generally end with `?sslmode=require`; add the flag if it is missing so Drizzle can
+     negotiate TLS.
+   - **`OPENROUTER_API_KEY`** – generate a key at [openrouter.ai](https://openrouter.ai) for workout-plan generation.
+   - **`SUPABASE_URL`**, **`SUPABASE_ANON_KEY`**, **`SUPABASE_SERVICE_ROLE_KEY`** – optional but recommended when
+     deploying on Supabase. Grab these from _Project Settings → API_ so the backend configuration matches your
+     project’s API URL, client anon key, and server-only service role secret. Keep the service role key private; it
+     is not required for local Postgres setups.
 
-   The example URL above targets a local Postgres instance; replace it with your managed provider string (for example,
-   `postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=require`) if you are using Neon or another hosted
-   option. The server validates these variables on startup, so make sure they are defined before running scripts.
+   The server validates the core environment values on startup, so ensure they are present before running scripts.
+
 
 3. **Provision PostgreSQL**
 
    FitPlanAI connects to a standard PostgreSQL database through the Node `pg` driver. Pick whichever option fits your
    workflow and ensure the `DATABASE_URL` in your `.env` points at the running instance before running migrations:
 
-   - **Use a managed provider** – services like [Neon](https://neon.tech) offer free serverless Postgres instances. Copy
-     the provided connection string (it should include `?sslmode=require`) into your `.env` file.
+
+   - **Use Supabase** – create a project at [supabase.com](https://supabase.com), open _Project Settings → Database_,
+     and copy the _Connection string_ (URI) for pooled connections. Supabase enforces SSL, so the URI should already
+     include `?sslmode=require`. Paste the value into your `.env` file as `DATABASE_URL`.
+
    - **Run Postgres locally** – if you have Docker installed, start a database with:
 
      ```bash
@@ -72,10 +76,7 @@ The repository is a single Vite workspace that serves the client UI and API from
    machine.
 
 4. **Apply database migrations**
-=======
-   The server validates these variables on startup, so make sure they are defined before running scripts.
 
-3. **Apply database migrations**
 
    ```bash
    npm run db:push
