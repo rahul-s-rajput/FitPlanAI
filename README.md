@@ -43,6 +43,7 @@ The repository is a single Vite workspace that serves the client UI and API from
    OPENROUTER_TIMEOUT_MS=60000
    ```
 
+
    The example URL above targets a local Postgres instance; replace it with your managed provider string (for example,
    `postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=require`) if you are using Neon or another hosted
    option. The server validates these variables on startup, so make sure they are defined before running scripts.
@@ -71,6 +72,10 @@ The repository is a single Vite workspace that serves the client UI and API from
    machine.
 
 4. **Apply database migrations**
+=======
+   The server validates these variables on startup, so make sure they are defined before running scripts.
+
+3. **Apply database migrations**
 
    ```bash
    npm run db:push
