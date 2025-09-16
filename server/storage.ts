@@ -130,6 +130,8 @@ export class MemStorage implements IStorage {
       restrictions: plan.restrictions ?? null,
       weeklyMinutes: plan.weeklyMinutes,
       dailyMinutes: plan.dailyMinutes,
+      nutritionalGuidance: plan.nutritionalGuidance ?? null,
+      aiMetadata: plan.aiMetadata ?? null,
       createdAt: new Date(),
     };
     this.workoutPlans.set(id, newPlan);
@@ -148,6 +150,8 @@ export class MemStorage implements IStorage {
       restrictions: updates.restrictions ?? existing.restrictions,
       weeklyMinutes: updates.weeklyMinutes ?? existing.weeklyMinutes,
       dailyMinutes: updates.dailyMinutes ?? existing.dailyMinutes,
+      nutritionalGuidance: updates.nutritionalGuidance ?? existing.nutritionalGuidance,
+      aiMetadata: updates.aiMetadata ?? existing.aiMetadata,
     };
     this.workoutPlans.set(id, updated);
     return updated;

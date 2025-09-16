@@ -37,7 +37,17 @@ interface WorkoutPlanRequest {
   dailyMinutes: number;
 }
 
+interface OpenRouterUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
 interface OpenRouterChatResponse {
+  id?: string;
+  created?: number;
+  model?: string;
+  usage?: OpenRouterUsage;
   choices: Array<{
     message: {
       content?: string;
@@ -76,6 +86,23 @@ const workoutPlanSchema = z
   .passthrough();
 
 type WorkoutPlanResponse = z.infer<typeof workoutPlanSchema>;
+
+interface WorkoutPlanGenerationMetadata {
+  provider: "openrouter";
+  model: string;
+  requestId?: string;
+  createdAt?: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+}
+
+interface WorkoutPlanGenerationResult {
+  plan: WorkoutPlanResponse;
+  metadata: WorkoutPlanGenerationMetadata;
+}
 
 function formatEquipmentList(equipment: Equipment[]): string {
   if (!equipment.length) {
@@ -222,7 +249,7 @@ async function callOpenRouter<T>(body: Record<string, unknown>): Promise<T> {
 
 export async function generateWorkoutPlan(
   request: WorkoutPlanRequest,
-): Promise<WorkoutPlanResponse> {
+): Promise<WorkoutPlanGenerationResult> {
   if (!request.goals || request.goals.length === 0) {
     throw new AIServiceError("At least one fitness goal is required", {
       status: 400,
@@ -329,7 +356,31 @@ Respond in JSON format with this structure:
       );
     }
 
-    return parsedPlan.data;
+    const metadata: WorkoutPlanGenerationMetadata = {
+      provider: "openrouter",
+      model: response.model ?? DEFAULT_MODEL,
+    };
+
+    if (response.id) {
+      metadata.requestId = response.id;
+    }
+
+    if (typeof response.created === "number") {
+      metadata.createdAt = new Date(response.created * 1000).toISOString();
+    }
+
+    if (response.usage) {
+      metadata.usage = {
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+        totalTokens: response.usage.total_tokens,
+      };
+    }
+
+    return {
+      plan: parsedPlan.data,
+      metadata,
+    };
   } catch (error) {
     if (error instanceof AIServiceError) {
       throw error;

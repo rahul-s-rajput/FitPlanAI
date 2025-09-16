@@ -139,7 +139,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const equipment = await storage.getUserEquipment(DEMO_USER_ID);
 
-      const generatedPlan = await generateWorkoutPlan({
+      const { plan: generatedPlan, metadata: aiMetadata } = await generateWorkoutPlan({
         equipment,
         goals,
         restrictions,
@@ -155,6 +155,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         restrictions,
         weeklyMinutes,
         dailyMinutes,
+        nutritionalGuidance: generatedPlan.nutritionalGuidance,
+        aiMetadata,
       });
 
       const savedWorkouts = [];
@@ -173,6 +175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         plan: savedPlan,
         workouts: savedWorkouts,
         nutritionalGuidance: generatedPlan.nutritionalGuidance,
+        aiMetadata,
       });
     } catch (error) {
       if (error instanceof AIServiceError) {

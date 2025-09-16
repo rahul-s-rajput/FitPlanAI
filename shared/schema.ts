@@ -27,6 +27,8 @@ export const workoutPlans = pgTable("workout_plans", {
   restrictions: jsonb("restrictions"), // {space: "limited", noise: "no_noise", outdoor: true}
   weeklyMinutes: integer("weekly_minutes").notNull(),
   dailyMinutes: integer("daily_minutes").notNull(),
+  nutritionalGuidance: text("nutritional_guidance"),
+  aiMetadata: jsonb("ai_metadata"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

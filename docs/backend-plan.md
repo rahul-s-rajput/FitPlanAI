@@ -44,8 +44,10 @@ This document outlines the roadmap for building out the FitPlanAI backend to sup
 ---
 
 ### Immediate Next Steps
-1. Persist nutritional guidance and AI metadata alongside generated workout plans so it can be revisited later.
-2. Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
-3. Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
+- [x] Persist nutritional guidance and AI metadata alongside generated workout plans so it can be revisited later.
+- [ ] Replace the in-memory storage for equipment and plans with Drizzle/PostgreSQL-backed repositories.
+- [ ] Expand workout logging routes with stricter validation and connect them to the frontend activity tracker.
+
+With AI metadata now stored, the next iteration can focus on wiring the plan repository to Drizzle and enriching logging validation so the client can rely on durable history.
 
 These steps will unlock end-to-end plan generation using the free OpenRouter models while keeping the path open for persistent storage and authentication in subsequent iterations.

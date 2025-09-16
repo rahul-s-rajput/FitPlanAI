@@ -17,17 +17,31 @@ export default function WorkoutPlanPage() {
       restrictions: { space: "limited", noise: "no_noise", outdoor: false },
       weeklyMinutes: 180,
       dailyMinutes: 30,
+      nutritionalGuidance:
+        "Target 120g protein daily, balance carbs around workouts, and add omega-3 rich foods.",
+      aiMetadata: {
+        provider: "openrouter",
+        model: "openai/gpt-oss-120b:free",
+        usage: { promptTokens: 320, completionTokens: 450 },
+      },
       createdAt: new Date(),
     },
     {
       id: "2",
-      userId: "user1", 
+      userId: "user1",
       name: "Weight Loss Circuit",
       description: "High-intensity circuit training for fat burning",
       goals: ["weight_loss", "endurance"],
       restrictions: { space: "moderate", noise: "low_noise", outdoor: true },
       weeklyMinutes: 240,
       dailyMinutes: 40,
+      nutritionalGuidance:
+        "Maintain a 300 kcal deficit, prioritise lean proteins and vegetables, and hydrate with 3L water daily.",
+      aiMetadata: {
+        provider: "openrouter",
+        model: "openai/gpt-oss-120b:free",
+        usage: { promptTokens: 280, completionTokens: 380 },
+      },
       createdAt: new Date(),
     },
   ]);
